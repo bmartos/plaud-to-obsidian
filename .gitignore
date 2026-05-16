@@ -1,0 +1,22 @@
+﻿# Dependencies
+node_modules/
+dist/
+
+# Security & Secrets
+.env
+auth.json
+credentials.json
+
+# Local Database & State
+*.db
+*.db-journal
+registry.json
+temp/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Private Data (Obsidian)
+# Ignoramos o conteúdo, mas mantemos a estrutura se desejar
+packages/core/test/fixtures/
