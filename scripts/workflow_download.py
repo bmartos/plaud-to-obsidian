@@ -1,0 +1,204 @@
+import subprocess
+import os
+import sys
+import re
+import requests
+from datetime import datetime
+
+# Add scripts directory to path to import db_manager
+sys.path.append(os.path.join(os.path.dirname(__file__)))
+import db_manager
+
+def download_audio(file_id, output_dir):
+    """Downloads a single audio file and returns its local path and size."""
+    try:
+        print(f"  Fetching download URL for {file_id}...")
+        result = subprocess.run(["plaud", "audio", file_id], capture_output=True, text=True, shell=True)
+        if result.returncode != 0:
+            print(f"    [Error] Failed to get audio URL: {result.stderr}")
+            return None, 0
+            
+        url_match = re.search(r'(https?://[^\s\n]+)', result.stdout)
+        if not url_match:
+            print(f"    [Error] URL not found in output.")
+            return None, 0
+            
+        url = url_match.group(1)
+        filepath = os.path.join(output_dir, f"{file_id}.mp3")
+        
+        if os.path.exists(filepath):
+            print(f"    [Skip] Audio already exists at {filepath}")
+            return filepath, os.path.getsize(filepath)
+
+        print(f"    Downloading to {filepath}...")
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        with open(filepath, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
+        filesize = os.path.getsize(filepath)
+        return filepath, filesize
+        
+    except Exception as e:
+        print(f"    [Error] Download failed: {e}")
+        return None, 0
+
+def download_asset(cmd_type, file_id, output_dir, ext=".md"):
+    """Downloads transcript or summary asset directly as a markdown file."""
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        filepath = os.path.join(output_dir, f"{file_id}{ext}")
+        
+        if os.path.exists(filepath):
+            print(f"    [Skip] {cmd_type} already exists at {filepath}")
+            return filepath
+
+        print(f"    Downloading {cmd_type} to {filepath}...")
+        
+        # Force UTF-8 for subprocess
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        
+        result = subprocess.run(["plaud", cmd_type, file_id, "-o", filepath], 
+                               capture_output=True, text=True, shell=True, env=env)
+        if result.returncode == 0:
+            return filepath
+        else:
+            print(f"    [Error] {cmd_type} download failed: {result.stderr}")
+            return None
+    except Exception as e:
+        print(f"    [Error] {cmd_type} exception: {e}")
+        return None
+
+def workflow_sync_and_download():
+    """
+    Core Workflow:
+    1. Sync with Plaud Cloud.
+    2. Identify recordings NOT in DB.
+    3. Register them and download ALL available assets (Audio, Transcript, Summary).
+    """
+    print("Starting Workflow: Unified Sync & Download")
+    
+    # Setup Environment
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(project_root, 'data', 'plaud_records.db')
+    
+    # Paths for internal storage (local audio)
+    audio_dir = os.path.join(project_root, 'data', 'audio')
+    
+    # Target paths for Obsidian (direct publish)
+    obsidian_root = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud')
+    obsidian_trans_dir = os.path.join(obsidian_root, 'transcription')
+    obsidian_sum_dir = os.path.join(obsidian_root, 'summary')
+
+    conn = db_manager.init_db(db_path)
+    
+    try:
+        print("Fetching cloud files...")
+        result = subprocess.run(["plaud", "files", "-s", "100"], capture_output=True, text=True, check=True, shell=True, env=env)
+        cloud_ids = re.findall(r'([a-f0-9]{32})', result.stdout)
+        
+        print(f"Found {len(cloud_ids)} files in cloud.")
+        
+        stats = {"new": 0, "existing": 0, "downloaded": 0, "transcribed": 0, "analyzed": 0, "errors": 0}
+
+        for file_id in cloud_ids:
+            # Re-read from DB to check if registered
+            record = db_manager.get_record(conn, file_id)
+            if record:
+                stats["existing"] += 1
+                continue
+            
+            print(f"[*] Processing: {file_id}")
+            stats["new"] += 1
+            
+            # Fetch full details
+            detail_res = subprocess.run(["plaud", "file", file_id], capture_output=True, shell=True, env=env)
+            if detail_res.returncode != 0:
+                print(f"  [Error] Could not fetch details for {file_id}")
+                stats["errors"] += 1
+                continue
+                
+            output = detail_res.stdout.decode('utf-8', errors='replace')
+            
+            def get_val(pattern):
+                m = re.search(pattern, output)
+                return m.group(1).strip() if m else None
+
+            from sync_recordings import parse_duration
+            
+            start_at_str = get_val(r'start_at:\s+(.*)')
+            try:
+                dt = datetime.fromisoformat(start_at_str.split('.')[0])
+                timestamp = int(dt.timestamp())
+            except:
+                timestamp = 0
+                
+            cloud_has_trans = 1 if get_val(r'transcript:\s+(.*)') == "available" else 0
+            cloud_has_sum = 1 if get_val(r'summary:\s+(.*)') == "available" else 0
+
+            # 1. Register Initial Entry
+            payload = {
+                "id": file_id,
+                "fullname": get_val(r'name:\s+(.*)'),
+                "duration": parse_duration(get_val(r'duration:\s+(.*)')),
+                "start_time": timestamp,
+                "is_trash": 0,
+                "downloaded": 0,
+                "transcribed": 0,
+                "analyzed": 0
+            }
+            db_manager.update_record(conn, payload)
+            
+            update_payload = {"id": file_id}
+
+            # 2. Download Audio
+            local_audio, actual_size = download_audio(file_id, audio_dir)
+            if local_audio:
+                update_payload.update({
+                    "downloaded": 1,
+                    "audio_path": local_audio,
+                    "filesize": actual_size
+                })
+                stats["downloaded"] += 1
+
+            # 3. Download Transcript directly to Obsidian
+            if cloud_has_trans:
+                local_trans = download_asset("transcript", file_id, obsidian_trans_dir, ext=".md")
+                if local_trans:
+                    update_payload.update({
+                        "transcribed": 1,
+                        "transcription_path": local_trans
+                    })
+                    stats["transcribed"] += 1
+
+            # 4. Download Summary directly to Obsidian
+            if cloud_has_sum:
+                local_sum = download_asset("summary", file_id, obsidian_sum_dir, ext=".md")
+                if local_sum:
+                    update_payload.update({
+                        "analyzed": 1,
+                        "summary_path": local_sum
+                    })
+                    stats["analyzed"] += 1
+
+            db_manager.update_record(conn, update_payload)
+            print(f"  [OK] Assets synced for {file_id}")
+
+        print(f"\nWorkflow Finished!")
+        print(f"  New recordings registered: {stats['new']}")
+        print(f"  Existing (skipped): {stats['existing']}")
+        print(f"  Assets Downloaded: Audio({stats['downloaded']}), Trans({stats['transcribed']}), Sum({stats['analyzed']})")
+
+    except Exception as e:
+        print(f"Workflow Error: {e}")
+    finally:
+        conn.close()
+
+if __name__ == "__main__":
+    workflow_sync_and_download()

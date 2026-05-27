@@ -158,43 +158,44 @@ export async function validatePlaudLogin() {
  */
 export async function listRecordings() {
   try {
-    // Executamos 'plaud files' que é o comando oficial para listar arquivos
-    const { stdout } = await execAsync(`"${OFFICIAL_PLAUD_PATH}" files`, { shell: 'cmd.exe' });
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const scriptPath = path.join(projectRoot, 'scripts', 'db_manager.py');
+    const dbPath = path.join(projectRoot, 'data', 'plaud_records.db');
     
-    const lines = stdout.split('\n');
-    const recordings: any[] = [];
-    
-    // Parsing manual básico da saída da tabela do CLI
-    // Exemplo: 06ef9eec72e4ceb20c71fa7a1f70b918    Cogna Summit | Entrevista RV          2026-05-26    46m39s
-    lines.forEach(line => {
-      const match = line.match(/^([a-f0-9]{32})\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(.+)$/);
-      if (match) {
-        recordings.push({
-          id: match[1],
-          filename: match[2].trim(),
-          date_formatted: match[3],
-          duration_text: match[4].trim(),
-          is_synced: false // Será verificado abaixo
-        });
-      }
-    });
-
-    // Cruzar com o banco de dados para saber o que já foi sincronizado
-    if (fs.existsSync(DB_PATH)) {
-      try {
-        const { stdout: dbOut } = await execAsync(`sqlite3 "${DB_PATH}" "SELECT id FROM recordings WHERE transcribed = 1;"`);
-        const syncedIds = new Set(dbOut.split('\n').map(id => id.trim()));
-        recordings.forEach(r => {
-          if (syncedIds.has(r.id)) r.is_synced = true;
-        });
-      } catch (dbErr) {
-        console.error('Erro ao consultar banco:', dbErr);
-      }
+    if (!fs.existsSync(dbPath)) {
+      return { success: true, data: [] };
     }
+
+    // Usar o db_manager.py em Python, pois ele já retorna JSON estruturado 
+    // e o CLI do sqlite3 não está disponível globalmente no ambiente.
+    const { stdout } = await execAsync(`python "${scriptPath}" list`);
+    
+    if (!stdout.trim()) {
+       return { success: true, data: [] };
+    }
+
+    const rawRecords = JSON.parse(stdout);
+    
+    const recordings = rawRecords.map((r: any) => {
+      // Logic for is_synced: Consider synced if it's been downloaded
+      const isSynced = r.downloaded === 1;
+
+      return {
+        id: r.id,
+        filename: r.fullname || 'Sem Título',
+        date_formatted: r.start_time ? r.start_time.split(' ')[0] : '',
+        duration_text: r.duration || '',
+        is_synced: isSynced,
+        downloaded: r.downloaded,
+        transcribed: r.transcribed,
+        analyzed: r.analyzed,
+        filesize_mb: r.filesize_mb
+      };
+    });
 
     return { success: true, data: recordings };
   } catch (error: any) {
-    console.error('Erro ao listar via CLI:', error);
+    console.error('Erro ao consultar banco via Python:', error);
     return { success: false, error: error.message };
   }
 }
@@ -204,12 +205,12 @@ export async function listRecordings() {
  */
 export async function syncRecordings() {
   try {
-    const folder = process.env.OBSIDIAN_PLAUD_PATH;
-    if (!folder) throw new Error('Caminho do Obsidian não configurado.');
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const scriptPath = path.join(projectRoot, 'scripts', 'workflow_download.py');
 
-    const cliPath = path.resolve(process.cwd(), '../cli/bin/plaud.ts');
-    const { stdout } = await execAsync(`npx tsx "${cliPath}" sync "${folder}"`, {
-      env: { ...process.env }
+    // Executa o novo workflow em Python
+    const { stdout } = await execAsync(`python "${scriptPath}"`, {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
 
     return { success: true, message: 'Sincronização concluída!', details: stdout };

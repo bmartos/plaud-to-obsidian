@@ -6,8 +6,6 @@ import json
 def init_db(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    # Drops and recreates for the new schema during this refinement phase
-    cursor.execute('DROP TABLE IF EXISTS recordings')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS recordings (
             id TEXT PRIMARY KEY,
@@ -15,17 +13,16 @@ def init_db(db_path):
             filesize_mb REAL DEFAULT 0.0,
             duration TEXT,
             start_time TEXT,
-            is_trash INTEGER,
-            is_trans INTEGER,
-            is_summary INTEGER,
+            is_trash INTEGER DEFAULT 0,
             downloaded INTEGER DEFAULT 0,
             downloaded_at TEXT,
             transcribed INTEGER DEFAULT 0,
             transcribed_at TEXT,
             analyzed INTEGER DEFAULT 0,
             analyzed_at TEXT,
-            raw_path TEXT,
-            final_path TEXT,
+            audio_path TEXT,
+            transcription_path TEXT,
+            summary_path TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -35,9 +32,8 @@ def init_db(db_path):
 
 ALLOWED_FIELDS = {
     'fullname', 'filesize_mb', 'duration', 'start_time', 
-    'is_trash', 'is_trans', 'is_summary', 
-    'downloaded', 'downloaded_at', 'transcribed', 'transcribed_at', 
-    'analyzed', 'analyzed_at', 'raw_path', 'final_path'
+    'is_trash', 'downloaded', 'downloaded_at', 'transcribed', 'transcribed_at', 
+    'analyzed', 'analyzed_at', 'audio_path', 'transcription_path', 'summary_path'
 }
 
 def format_duration(seconds):
@@ -49,6 +45,11 @@ def format_duration(seconds):
         return f"{h:02d}:{m:02d}:{s:02d}"
     except:
         return "00:00:00"
+
+def get_now_utc3():
+    from datetime import datetime, timedelta, timezone
+    dt = datetime.now(timezone.utc) - timedelta(hours=3)
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
 
 def format_record(record):
     """Formats raw Plaud payload to match database schema."""
