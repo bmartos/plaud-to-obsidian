@@ -75,12 +75,70 @@ def main():
             sys.exit(1)
 
     elif action == "summarize":
-        print("Note: Local summarization with Gemini AI is not fully integrated yet.")
-        print("This action will trigger the agentic workflow logic in the future.")
-        # Placeholder for AI summarize logic
-        # Once implemented, it should generate the summary, save to Obsidan/plaud/summary
-        # and update DB: db_manager.update_record(conn, {"id": file_id, "analyzed": 1, "summary_path": ...})
-        sys.exit(1)
+        if not record['transcription_path'] or not os.path.exists(record['transcription_path']):
+            print("Error: Transcription must exist before summarizing.")
+            sys.exit(1)
+            
+        print(f"Starting AI summarization for {file_id}...")
+        
+        try:
+            from google import genai
+            from google.genai import types
+            from dotenv import load_dotenv
+            
+            # Load .env from root to get GEMINI_API_KEY
+            load_dotenv(os.path.join(project_root, '.env'))
+            
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                print("Error: GEMINI_API_KEY environment variable is not set in .env file.")
+                sys.exit(1)
+                
+            client = genai.Client(api_key=api_key)
+            
+            with open(record['transcription_path'], 'r', encoding='utf-8') as f:
+                transcript_text = f.read()
+                
+            prompt = f"""
+Você é um assistente especializado em organizar atas e anotações. 
+Baseado na transcrição abaixo, crie um resumo estruturado contendo:
+1. Título do assunto principal.
+2. Principais tópicos discutidos (em bullet points).
+3. Decisões tomadas ou próximos passos (Action Items).
+
+Transcrição:
+{transcript_text}
+"""
+            # Using gemini-3.5-flash as it is available in this environment
+            response = client.models.generate_content(
+                model='gemini-3.5-flash', 
+                contents=prompt,
+            )
+            
+            summary_text = response.text
+            
+            sum_dir = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud', 'summary')
+            os.makedirs(sum_dir, exist_ok=True)
+            
+            target_filename = get_target_filename(file_id, record['fullname'], record['start_time'], ext=".md")
+            sum_path = os.path.join(sum_dir, target_filename)
+            
+            with open(sum_path, "w", encoding="utf-8") as f:
+                f.write(summary_text)
+                
+            db_manager.update_record(conn, {
+                "id": file_id,
+                "analyzed": 1,
+                "summary_path": sum_path
+            })
+            print(f"Success: Summary saved to {sum_path}")
+            
+        except ImportError:
+            print("Error: google-genai or python-dotenv package not installed. Run 'pip install google-genai python-dotenv'")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error during summarization: {e}")
+            sys.exit(1)
 
     else:
         print(f"Error: Unknown action '{action}'")
