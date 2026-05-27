@@ -1,5 +1,5 @@
-export { PlaudAuth } from './auth.js';
-export { PlaudClient } from './client.js';
-export { PlaudConfig } from './config.js';
-export { initDb, updateStatus } from './db/index.js';
-export type * from './types.js';
+export { PlaudAuth } from './auth';
+export { PlaudClient } from './client';
+export { PlaudConfig } from './config';
+export { initDb, updateStatus } from './db/index';
+export type * from './types';

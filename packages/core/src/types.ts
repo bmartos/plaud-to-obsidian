@@ -4,21 +4,21 @@ export interface PlaudCredentials {
   region: 'us' | 'eu';
 }
 
-export interface PlaudTokenData {
-  accessToken: string;
-  tokenType: string;
+export interface PlaudSession {
+  sessionId: string;
+  sessionType: string;
   issuedAt: number;   // epoch ms
   expiresAt: number;  // epoch ms (decoded from JWT)
 }
 
 export interface PlaudConfig {
   credentials?: PlaudCredentials;
-  token?: PlaudTokenData;
+  session?: PlaudSession;
 }
 
 export const BASE_URLS: Record<string, string> = {
   us: 'https://platform.plaud.ai/developer/api',
-  eu: 'https://platform.plaud.ai/developer/api',
+  eu: 'https://api-euc1.plaud.ai/developer/api',
 };
 
 export interface PlaudRecording {

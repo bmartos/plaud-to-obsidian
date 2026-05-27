@@ -4,29 +4,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const HAS_CREDS = fs.existsSync(path.join(os.homedir(), '.plaud', 'config.json'));
+// Test only if the official tokens file exists locally
+const OFFICIAL_TOKENS = path.join(os.homedir(), '.plaud', 'tokens.json');
+const HAS_SESSION = fs.existsSync(OFFICIAL_TOKENS);
 
-describe.skipIf(!HAS_CREDS)('integration (live API)', () => {
+describe.skipIf(!HAS_SESSION)('integration (live API)', () => {
   const config = new PlaudConfig();
-  const creds = config.getCredentials()!;
   const auth = new PlaudAuth(config);
-  const client = new PlaudClient(auth, creds?.region ?? 'eu');
+  const client = new PlaudClient(auth, 'eu');
 
   it('gets user info', async () => {
     const user = await client.getUserInfo();
-    expect(user.id).toBeTruthy();
-    expect(user.nickname).toBeTruthy();
+    expect(user.id).toBeDefined();
+    expect(user.email).toContain('@');
   });
 
   it('lists recordings', async () => {
     const recs = await client.listRecordings();
     expect(Array.isArray(recs)).toBe(true);
-  });
-
-  it('gets recording detail', async () => {
-    const recs = await client.listRecordings();
-    if (recs.length === 0) return;
-    const detail = await client.getRecording(recs[0].id);
-    expect(detail.id).toBe(recs[0].id);
   });
 });

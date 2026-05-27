@@ -6,47 +6,32 @@ import * as os from 'os';
 
 describe('PlaudConfig', () => {
   let tmpDir: string;
-  let config: Config;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plaud-test-'));
-    config = new Config(tmpDir);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plaud-config-'));
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates config dir if missing', () => {
-    const newDir = path.join(tmpDir, 'subdir');
-    const c = new Config(newDir);
-    c.save({ credentials: { email: 'a@b.com', password: 'x', region: 'eu' } });
-    expect(fs.existsSync(newDir)).toBe(true);
+  it('loads session from official tokens.json', () => {
+    const tokensFile = path.join(tmpDir, 'tokens.json');
+    fs.writeFileSync(tokensFile, JSON.stringify({
+      access_token: 'abc',
+      token_type: 'bearer',
+      expires_at: 12345
+    }));
+
+    const config = new Config(tmpDir);
+    const session = config.getSession();
+    expect(session?.sessionId).toBe('abc');
+    expect(session?.expiresAt).toBe(12345);
   });
 
-  it('saves and loads credentials', () => {
-    config.save({ credentials: { email: 'test@plaud.ai', password: 'secret', region: 'eu' } });
-    const loaded = config.load();
-    expect(loaded.credentials?.email).toBe('test@plaud.ai');
-    expect(loaded.credentials?.region).toBe('eu');
-  });
-
-  it('saves and loads token', () => {
-    config.saveToken({ accessToken: 'eyJ...', tokenType: 'Bearer', issuedAt: 1000, expiresAt: 2000 });
-    const loaded = config.load();
-    expect(loaded.token?.accessToken).toBe('eyJ...');
-  });
-
-  it('returns empty config when no file exists', () => {
-    const loaded = config.load();
-    expect(loaded.credentials).toBeUndefined();
-    expect(loaded.token).toBeUndefined();
-  });
-
-  it.skipIf(process.platform === 'win32')('sets file permissions to 0600', () => {
-    config.save({ credentials: { email: 'a@b.com', password: 'x', region: 'us' } });
-    const stat = fs.statSync(path.join(tmpDir, 'config.json'));
-    const mode = (stat.mode & 0o777).toString(8);
-    expect(mode).toBe('600');
+  it('returns empty object when file is missing', () => {
+    const config = new Config(tmpDir);
+    expect(config.load()).toEqual({});
+    expect(config.getSession()).toBeUndefined();
   });
 });

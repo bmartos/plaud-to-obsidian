@@ -5,9 +5,9 @@ export async function loginCommand(_args: string[]): Promise<void> {
   console.log('\n--- Plaud Authentication Setup ---');
   
   const config = new PlaudConfig();
-  let token = config.getToken();
+  let session = config.getSession();
 
-  if (token) {
+  if (session) {
     console.log('Checking for existing session...');
     try {
       const auth = new PlaudAuth(config);
@@ -34,18 +34,18 @@ export async function loginCommand(_args: string[]): Promise<void> {
     console.log('------------------------------------------------------------');
     
     // Check again after login
-    const updatedToken = config.getToken();
-    if (updatedToken) {
+    const updatedSession = config.getSession();
+    if (updatedSession) {
       const auth = new PlaudAuth(config);
       const client = new PlaudClient(auth, 'eu');
       const user = await client.getUserInfo();
       console.log(`\n✅ Login successful!`);
       console.log(`User: ${user.nickname} (${user.email})`);
     } else {
-      console.log('\n❌ Login appeared to finish, but no session token was found.');
+      console.log('\n❌ Login appeared to finish, but no session was found.');
     }
   } catch (err: any) {
-    console.error(`\n❌ Error executing official login: \${err.message}`);
+    console.error(`\n❌ Error executing official login: ${err.message}`);
     console.log('Please make sure @plaud-ai/cli is installed globally: npm install -g @plaud-ai/cli');
   }
 }
