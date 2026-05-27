@@ -9,7 +9,24 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 import db_manager
 
-def download_audio(file_id, output_dir):
+def sanitize_filename(name):
+    clean = re.sub(r'[\\/*?:"<>|]', "-", name)
+    clean = clean.replace(" ", "_")
+    return clean
+
+def get_target_filename(file_id, fullname, start_time_ts, ext=".md"):
+    if start_time_ts:
+        from datetime import datetime, timezone, timedelta
+        dt = datetime.fromtimestamp(start_time_ts, tz=timezone.utc)
+        dt_brazil = dt - timedelta(hours=3)
+        date_str = dt_brazil.strftime('%Y-%m-%d')
+    else:
+        date_str = "1970-01-01"
+    
+    safe_name = sanitize_filename(fullname)
+    return f"{date_str}_{safe_name}{ext}"
+
+def download_audio(file_id, target_filename, output_dir):
     """Downloads a single audio file and returns its local path and size."""
     try:
         print(f"  Fetching download URL for {file_id}...")
@@ -24,7 +41,7 @@ def download_audio(file_id, output_dir):
             return None, 0
             
         url = url_match.group(1)
-        filepath = os.path.join(output_dir, f"{file_id}.mp3")
+        filepath = os.path.join(output_dir, target_filename)
         
         if os.path.exists(filepath):
             print(f"    [Skip] Audio already exists at {filepath}")
@@ -45,11 +62,11 @@ def download_audio(file_id, output_dir):
         print(f"    [Error] Download failed: {e}")
         return None, 0
 
-def download_asset(cmd_type, file_id, output_dir, ext=".md"):
+def download_asset(cmd_type, file_id, target_filename, output_dir):
     """Downloads transcript or summary asset directly as a markdown file."""
     try:
         os.makedirs(output_dir, exist_ok=True)
-        filepath = os.path.join(output_dir, f"{file_id}{ext}")
+        filepath = os.path.join(output_dir, target_filename)
         
         if os.path.exists(filepath):
             print(f"    [Skip] {cmd_type} already exists at {filepath}")
@@ -157,8 +174,13 @@ def workflow_sync_and_download():
             
             update_payload = {"id": file_id}
 
+            # Determine target filename
+            target_filename = get_target_filename(file_id, payload['fullname'], payload['start_time'], ext="")
+            audio_target = f"{target_filename}.mp3"
+            md_target = f"{target_filename}.md"
+
             # 2. Download Audio
-            local_audio, actual_size = download_audio(file_id, audio_dir)
+            local_audio, actual_size = download_audio(file_id, audio_target, audio_dir)
             if local_audio:
                 update_payload.update({
                     "downloaded": 1,
@@ -169,7 +191,7 @@ def workflow_sync_and_download():
 
             # 3. Download Transcript directly to Obsidian
             if cloud_has_trans:
-                local_trans = download_asset("transcript", file_id, obsidian_trans_dir, ext=".md")
+                local_trans = download_asset("transcript", file_id, md_target, obsidian_trans_dir)
                 if local_trans:
                     update_payload.update({
                         "transcribed": 1,
@@ -179,7 +201,7 @@ def workflow_sync_and_download():
 
             # 4. Download Summary directly to Obsidian
             if cloud_has_sum:
-                local_sum = download_asset("summary", file_id, obsidian_sum_dir, ext=".md")
+                local_sum = download_asset("summary", file_id, md_target, obsidian_sum_dir)
                 if local_sum:
                     update_payload.update({
                         "analyzed": 1,
