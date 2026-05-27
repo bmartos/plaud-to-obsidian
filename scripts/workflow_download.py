@@ -14,12 +14,18 @@ def sanitize_filename(name):
     clean = clean.replace(" ", "_")
     return clean
 
-def get_target_filename(file_id, fullname, start_time_ts, ext=".md"):
-    if start_time_ts:
-        from datetime import datetime, timezone, timedelta
-        dt = datetime.fromtimestamp(start_time_ts, tz=timezone.utc)
-        dt_brazil = dt - timedelta(hours=3)
-        date_str = dt_brazil.strftime('%Y-%m-%d')
+def get_target_filename(file_id, fullname, start_time_val, ext=".md"):
+    if start_time_val:
+        if isinstance(start_time_val, (int, float)):
+            from datetime import datetime, timezone, timedelta
+            dt = datetime.fromtimestamp(start_time_val, tz=timezone.utc)
+            dt_brazil = dt - timedelta(hours=3)
+            date_str = dt_brazil.strftime('%Y-%m-%d')
+        elif isinstance(start_time_val, str):
+            # If it's already a formatted string like 'YYYY-MM-DD HH:MM:SS'
+            date_str = start_time_val.split(' ')[0]
+        else:
+            date_str = "1970-01-01"
     else:
         date_str = "1970-01-01"
     
@@ -30,14 +36,22 @@ def download_audio(file_id, target_filename, output_dir):
     """Downloads a single audio file and returns its local path and size."""
     try:
         print(f"  Fetching download URL for {file_id}...")
-        result = subprocess.run(["plaud", "audio", file_id], capture_output=True, text=True, shell=True)
+        
+        # Force UTF-8 environment
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        
+        result = subprocess.run(["plaud", "audio", file_id], capture_output=True, shell=True, env=env)
         if result.returncode != 0:
-            print(f"    [Error] Failed to get audio URL: {result.stderr}")
+            print(f"    [Error] Failed to get audio URL: {result.stderr.decode('utf-8', 'ignore')}")
             return None, 0
             
-        url_match = re.search(r'(https?://[^\s\n]+)', result.stdout)
+        output = result.stdout.decode('utf-8', 'ignore')
+        
+        # Match the S3 URL exactly (handles very long AWS signed URLs with query parameters)
+        url_match = re.search(r'(https://plaud-bucket\.s3-accelerate\.amazonaws\.com/[^\s\n]+)', output)
         if not url_match:
-            print(f"    [Error] URL not found in output.")
+            print(f"    [Error] URL not found in output. Output was:\n{output[:200]}...")
             return None, 0
             
         url = url_match.group(1)
