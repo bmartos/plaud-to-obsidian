@@ -168,7 +168,9 @@ export async function listRecordings() {
 
     // Usar o db_manager.py em Python, pois ele já retorna JSON estruturado 
     // e o CLI do sqlite3 não está disponível globalmente no ambiente.
-    const { stdout } = await execAsync(`python "${scriptPath}" list`);
+    const { stdout } = await execAsync(`python "${scriptPath}" list`, {
+      env: { ...process.env, DATABASE_URL: dbPath, PYTHONIOENCODING: 'utf-8' }
+    });
     
     if (!stdout.trim()) {
        return { success: true, data: [] };
@@ -217,5 +219,24 @@ export async function syncRecordings() {
   } catch (error: any) {
     console.error('Erro na sincronização:', error);
     return { success: false, message: 'Falha na sincronização.', error: error.message };
+  }
+}
+
+/**
+ * Processa uma ação individual em um arquivo (download, transcribe, summarize)
+ */
+export async function processAction(actionType: 'download' | 'transcribe' | 'summarize', fileId: string) {
+  try {
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const scriptPath = path.join(projectRoot, 'scripts', 'process_single.py');
+
+    const { stdout, stderr } = await execAsync(`python "${scriptPath}" ${actionType} ${fileId}`, {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+
+    return { success: true, message: `Ação '${actionType}' concluída com sucesso!`, details: stdout };
+  } catch (error: any) {
+    console.error(`Erro na ação ${actionType} para o arquivo ${fileId}:`, error);
+    return { success: false, message: `Falha na ação '${actionType}'.`, error: error.message };
   }
 }
