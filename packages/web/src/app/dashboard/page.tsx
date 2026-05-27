@@ -32,6 +32,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadData();
+    
+    // Polling silently every 5 seconds to update progress bars without causing full page loading state
+    const interval = setInterval(() => {
+      listRecordings().then(res => {
+        if (res.success) {
+          setRecordings(res.data || []);
+        }
+      });
+    }, 5000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const handleSync = async () => {
@@ -39,10 +50,9 @@ export default function DashboardPage() {
     try {
       const result = await syncRecordings();
       if (result.success) {
-        alert('Sincronização concluída com sucesso!');
-        await loadData(); // Recarrega a lista
+        alert('Sincronização iniciada em segundo plano!');
       } else {
-        alert('Erro ao sincronizar: ' + result.error);
+        alert('Erro ao iniciar sincronização: ' + result.error);
       }
     } finally {
       setSyncing(false);
@@ -53,11 +63,10 @@ export default function DashboardPage() {
     setProcessingId(`${type}-${id}`);
     try {
       const result = await processAction(type, id);
-      if (result.success) {
-        await loadData();
-      } else {
+      if (!result.success) {
         alert(`Erro: ${result.message}\nDetalhes: ${result.error}`);
       }
+      // UI updates via polling
     } finally {
       setProcessingId(null);
     }
@@ -66,6 +75,9 @@ export default function DashboardPage() {
   const totalFiles = recordings.length;
   const toTranscribe = recordings.filter(r => !r.transcribed).length;
   const toSummarize = recordings.filter(r => !r.analyzed).length;
+
+  // Determine if any task is globally running
+  const isAnyProcessing = recordings.some(r => r.status && r.status !== 'idle' && r.status !== 'error');
 
   if (loading && recordings.length === 0) {
     return (
@@ -85,9 +97,9 @@ export default function DashboardPage() {
           </div>
           <button 
             onClick={handleSync}
-            disabled={syncing || processingId !== null}
+            disabled={syncing || processingId !== null || isAnyProcessing}
             className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 ${
-              syncing || processingId !== null ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
+              syncing || processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
             }`}
           >
             {syncing ? (
@@ -144,11 +156,6 @@ export default function DashboardPage() {
         </div>
 
         <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
-           {loading && recordings.length > 0 && (
-             <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-10">
-               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-             </div>
-           )}
            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <h2 className="font-black text-slate-800">Suas Gravações (Plaud Cloud)</h2>
               <span className="text-[10px] font-bold text-slate-400 uppercase">{recordings.length} arquivos encontrados</span>
@@ -158,12 +165,12 @@ export default function DashboardPage() {
              <table className="w-full text-left border-collapse">
                <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                  <tr>
-                   <th className="p-4 border-b border-slate-100">Data de Gravação</th>
-                   <th className="p-4 border-b border-slate-100">Título</th>
-                   <th className="p-4 border-b border-slate-100">Duração</th>
-                   <th className="p-4 border-b border-slate-100 text-center">Download</th>
-                   <th className="p-4 border-b border-slate-100 text-center">Transcrição</th>
-                   <th className="p-4 border-b border-slate-100 text-center">Resumo</th>
+                   <th className="p-4 border-b border-slate-100 w-32">Data de Gravação</th>
+                   <th className="p-4 border-b border-slate-100 min-w-[200px]">Título</th>
+                   <th className="p-4 border-b border-slate-100 w-24">Duração</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">Download</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">Transcrição</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">Resumo</th>
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-50">
@@ -178,60 +185,78 @@ export default function DashboardPage() {
                          </div>
                        </td>
                        <td className="p-4 text-xs font-medium text-slate-500">{rec.duration_text || (Math.round(rec.duration / 60000) + ' min')}</td>
-                       <td className="p-4 text-center">
+                       
+                       {/* Download Column */}
+                       <td className="p-4 text-center align-middle">
                          {rec.downloaded ? (
                            <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
                              Sim
                            </span>
+                         ) : rec.status === 'downloading' ? (
+                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
+                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 10}%` }}></div>
+                            </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('download', rec.id)}
-                             disabled={processingId !== null}
+                             disabled={processingId !== null || isAnyProcessing}
                              className={`inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase transition-colors ${
-                               processingId === `download-${rec.id}` 
-                                 ? 'bg-blue-100 text-blue-600 animate-pulse' 
+                               processingId !== null || isAnyProcessing
+                                 ? 'bg-slate-100 text-slate-300 cursor-not-allowed' 
                                  : 'bg-slate-100 text-slate-400 hover:bg-blue-50 hover:text-blue-600 cursor-pointer'
                              }`}
                            >
-                             {processingId === `download-${rec.id}` ? '...' : 'Não'}
+                             Não
                            </button>
                          )}
                        </td>
-                       <td className="p-4 text-center">
+
+                       {/* Transcribe Column */}
+                       <td className="p-4 text-center align-middle">
                          {rec.transcribed ? (
                            <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
                              Sim
                            </span>
+                         ) : rec.status === 'transcribing' ? (
+                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
+                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 5}%` }}></div>
+                            </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('transcribe', rec.id)}
-                             disabled={processingId !== null}
+                             disabled={processingId !== null || isAnyProcessing}
                              className={`inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase transition-colors ${
-                               processingId === `transcribe-${rec.id}` 
-                                 ? 'bg-blue-100 text-blue-600 animate-pulse' 
+                               processingId !== null || isAnyProcessing
+                                 ? 'bg-slate-100 text-slate-300 cursor-not-allowed' 
                                  : 'bg-slate-100 text-slate-400 hover:bg-blue-50 hover:text-blue-600 cursor-pointer'
                              }`}
                            >
-                             {processingId === `transcribe-${rec.id}` ? '...' : 'Não'}
+                             Não
                            </button>
                          )}
                        </td>
-                       <td className="p-4 text-center">
+
+                       {/* Summarize Column */}
+                       <td className="p-4 text-center align-middle">
                          {rec.analyzed ? (
                            <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
                              Sim
                            </span>
+                         ) : rec.status === 'summarizing' ? (
+                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
+                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 50}%` }}></div>
+                            </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('summarize', rec.id)}
-                             disabled={processingId !== null}
+                             disabled={processingId !== null || isAnyProcessing}
                              className={`inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase transition-colors ${
-                               processingId === `summarize-${rec.id}` 
-                                 ? 'bg-blue-100 text-blue-600 animate-pulse' 
+                               processingId !== null || isAnyProcessing
+                                 ? 'bg-slate-100 text-slate-300 cursor-not-allowed' 
                                  : 'bg-slate-100 text-slate-400 hover:bg-blue-50 hover:text-blue-600 cursor-pointer'
                              }`}
                            >
-                             {processingId === `summarize-${rec.id}` ? '...' : 'Não'}
+                             Não
                            </button>
                          )}
                        </td>

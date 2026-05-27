@@ -191,7 +191,9 @@ export async function listRecordings() {
         downloaded: r.downloaded,
         transcribed: r.transcribed,
         analyzed: r.analyzed,
-        filesize_mb: r.filesize_mb
+        filesize_mb: r.filesize_mb,
+        status: r.status || 'idle',
+        progress: r.progress || 0
       };
     });
 
@@ -230,11 +232,15 @@ export async function processAction(actionType: 'download' | 'transcribe' | 'sum
     const projectRoot = path.resolve(process.cwd(), '../..');
     const scriptPath = path.join(projectRoot, 'scripts', 'process_single.py');
 
-    const { stdout, stderr } = await execAsync(`python "${scriptPath}" ${actionType} ${fileId}`, {
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    // Fire and forget so we don't block the UI or timeout the server action
+    const child = spawn('python', [scriptPath, actionType, fileId], {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      detached: true,
+      stdio: 'ignore'
     });
+    child.unref();
 
-    return { success: true, message: `Ação '${actionType}' concluída com sucesso!`, details: stdout };
+    return { success: true, message: `Ação '${actionType}' iniciada em segundo plano.` };
   } catch (error: any) {
     console.error(`Erro na ação ${actionType} para o arquivo ${fileId}:`, error);
     return { success: false, message: `Falha na ação '${actionType}'.`, error: error.message };

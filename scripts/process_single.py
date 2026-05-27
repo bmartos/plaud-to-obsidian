@@ -33,6 +33,7 @@ def main():
         audio_dir = os.path.join(project_root, 'data', 'audio')
         os.makedirs(audio_dir, exist_ok=True)
         
+        db_manager.update_record(conn, {"id": file_id, "status": "downloading", "progress": 50})
         target_filename = get_target_filename(file_id, record['fullname'], record['start_time'], ext=".mp3")
         local_audio, actual_size = download_audio(file_id, target_filename, audio_dir)
         
@@ -41,10 +42,13 @@ def main():
                 "id": file_id,
                 "downloaded": 1,
                 "audio_path": local_audio,
-                "filesize": actual_size
+                "filesize": actual_size,
+                "status": "idle",
+                "progress": 0
             })
             print(f"Success: Audio downloaded to {local_audio}")
         else:
+            db_manager.update_record(conn, {"id": file_id, "status": "error", "progress": 0})
             print("Error: Failed to download audio.")
             sys.exit(1)
 
@@ -60,17 +64,33 @@ def main():
         
         script_path = os.path.join(project_root, 'scripts', 'transcribe_local.py')
         
+        db_manager.update_record(conn, {"id": file_id, "status": "transcribing", "progress": 0})
         print(f"Starting local transcription for {file_id}...")
-        result = subprocess.run(["python", script_path, record['audio_path'], "medium", trans_path], env=env)
         
-        if result.returncode == 0 and os.path.exists(trans_path):
+        p = subprocess.Popen(["python", script_path, record['audio_path'], "medium", trans_path], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+        
+        for line in p.stdout:
+            print(line, end="")
+            if "Progresso:" in line:
+                try:
+                    pct = int(re.search(r'Progresso:\s*(\d+)%', line).group(1))
+                    db_manager.update_record(conn, {"id": file_id, "progress": pct})
+                except Exception as e:
+                    pass
+                    
+        p.wait()
+        
+        if p.returncode == 0 and os.path.exists(trans_path):
             db_manager.update_record(conn, {
                 "id": file_id,
                 "transcribed": 1,
-                "transcription_path": trans_path
+                "transcription_path": trans_path,
+                "status": "idle",
+                "progress": 0
             })
             print(f"Success: Transcription saved to {trans_path}")
         else:
+            db_manager.update_record(conn, {"id": file_id, "status": "error", "progress": 0})
             print("Error: Local transcription failed.")
             sys.exit(1)
 
@@ -79,6 +99,7 @@ def main():
             print("Error: Transcription must exist before summarizing.")
             sys.exit(1)
             
+        db_manager.update_record(conn, {"id": file_id, "status": "summarizing", "progress": 50})
         print(f"Starting AI summarization for {file_id}...")
         
         try:
@@ -92,6 +113,7 @@ def main():
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 print("Error: GEMINI_API_KEY environment variable is not set in .env file.")
+                db_manager.update_record(conn, {"id": file_id, "status": "error", "progress": 0})
                 sys.exit(1)
                 
             client = genai.Client(api_key=api_key)
@@ -129,15 +151,19 @@ Transcrição:
             db_manager.update_record(conn, {
                 "id": file_id,
                 "analyzed": 1,
-                "summary_path": sum_path
+                "summary_path": sum_path,
+                "status": "idle",
+                "progress": 0
             })
             print(f"Success: Summary saved to {sum_path}")
             
         except ImportError:
             print("Error: google-genai or python-dotenv package not installed. Run 'pip install google-genai python-dotenv'")
+            db_manager.update_record(conn, {"id": file_id, "status": "error", "progress": 0})
             sys.exit(1)
         except Exception as e:
             print(f"Error during summarization: {e}")
+            db_manager.update_record(conn, {"id": file_id, "status": "error", "progress": 0})
             sys.exit(1)
 
     else:

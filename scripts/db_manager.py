@@ -2,10 +2,11 @@
 import sys
 import os
 import json
-
 def init_db(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    # Drops and recreates for the new schema consolidation
+    cursor.execute('DROP TABLE IF EXISTS recordings')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS recordings (
             id TEXT PRIMARY KEY,
@@ -23,6 +24,8 @@ def init_db(db_path):
             audio_path TEXT,
             transcription_path TEXT,
             summary_path TEXT,
+            status TEXT DEFAULT 'idle',
+            progress INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -33,9 +36,9 @@ def init_db(db_path):
 ALLOWED_FIELDS = {
     'fullname', 'filesize_mb', 'duration', 'start_time', 
     'is_trash', 'downloaded', 'downloaded_at', 'transcribed', 'transcribed_at', 
-    'analyzed', 'analyzed_at', 'audio_path', 'transcription_path', 'summary_path'
+    'analyzed', 'analyzed_at', 'audio_path', 'transcription_path', 'summary_path',
+    'status', 'progress'
 }
-
 def format_duration(seconds):
     """Converts seconds to HH:MM:SS string."""
     try:
