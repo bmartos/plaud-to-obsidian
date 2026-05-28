@@ -103,14 +103,18 @@ def download_asset(cmd_type, file_id, target_filename, output_dir):
         print(f"    [Error] {cmd_type} exception: {e}")
         return None
 
-def workflow_sync_and_download():
+def workflow_sync_and_download(download_assets=False):
     """
     Core Workflow:
     1. Sync with Plaud Cloud.
     2. Identify recordings NOT in DB.
-    3. Register them and download ALL available assets (Audio, Transcript, Summary).
+    3. Register them.
+    4. IF download_assets is True: download ALL available assets (Audio, Transcript, Summary).
     """
-    print("Starting Workflow: Unified Sync & Download")
+    if download_assets:
+        print("Starting Workflow: Unified Sync & Download")
+    else:
+        print("Starting Workflow: Metadata Sync Only")
     
     # Setup Environment
     env = os.environ.copy()
@@ -186,6 +190,10 @@ def workflow_sync_and_download():
             }
             db_manager.update_record(conn, payload)
             
+            if not download_assets:
+                print(f"  [OK] Metadata registered for {file_id} (Assets skipped)")
+                continue
+
             update_payload = {"id": file_id}
 
             # Determine target filename
@@ -229,7 +237,8 @@ def workflow_sync_and_download():
         print(f"\nWorkflow Finished!")
         print(f"  New recordings registered: {stats['new']}")
         print(f"  Existing (skipped): {stats['existing']}")
-        print(f"  Assets Downloaded: Audio({stats['downloaded']}), Trans({stats['transcribed']}), Sum({stats['analyzed']})")
+        if download_assets:
+            print(f"  Assets Downloaded: Audio({stats['downloaded']}), Trans({stats['transcribed']}), Sum({stats['analyzed']})")
 
     except Exception as e:
         print(f"Workflow Error: {e}")
@@ -237,4 +246,9 @@ def workflow_sync_and_download():
         conn.close()
 
 if __name__ == "__main__":
-    workflow_sync_and_download()
+    import argparse
+    parser = argparse.ArgumentParser(description="Plaud Unified Sync & Download")
+    parser.add_argument("--download", action="store_true", help="Download all available assets for new recordings")
+    args = parser.parse_args()
+    
+    workflow_sync_and_download(download_assets=args.download)

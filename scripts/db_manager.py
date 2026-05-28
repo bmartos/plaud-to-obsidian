@@ -5,8 +5,7 @@ import json
 def init_db(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    # Drops and recreates for the new schema consolidation
-    cursor.execute('DROP TABLE IF EXISTS recordings')
+    # Ensure the table exists without dropping it every time
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS recordings (
             id TEXT PRIMARY KEY,
