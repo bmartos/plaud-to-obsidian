@@ -2,20 +2,29 @@
 import sys
 import os
 import json
-
 def init_db(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    # Ensure the table exists without dropping it every time
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS recordings (
             id TEXT PRIMARY KEY,
-            title TEXT,
-            date TEXT,
+            fullname TEXT,
+            filesize_mb REAL DEFAULT 0.0,
+            duration TEXT,
+            start_time TEXT,
+            is_trash INTEGER DEFAULT 0,
             downloaded INTEGER DEFAULT 0,
+            downloaded_at TEXT,
             transcribed INTEGER DEFAULT 0,
+            transcribed_at TEXT,
             analyzed INTEGER DEFAULT 0,
-            raw_path TEXT,
-            final_path TEXT,
+            analyzed_at TEXT,
+            audio_path TEXT,
+            transcription_path TEXT,
+            summary_path TEXT,
+            status TEXT DEFAULT 'idle',
+            progress INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -23,10 +32,64 @@ def init_db(db_path):
     conn.commit()
     return conn
 
-ALLOWED_FIELDS = {'title', 'date', 'downloaded', 'transcribed', 'analyzed', 'raw_path', 'final_path'}
+ALLOWED_FIELDS = {
+    'fullname', 'filesize_mb', 'duration', 'start_time', 
+    'is_trash', 'downloaded', 'downloaded_at', 'transcribed', 'transcribed_at', 
+    'analyzed', 'analyzed_at', 'audio_path', 'transcription_path', 'summary_path',
+    'status', 'progress'
+}
+def format_duration(seconds):
+    """Converts seconds to HH:MM:SS string."""
+    try:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    except:
+        return "00:00:00"
+
+def get_now_utc3():
+    from datetime import datetime, timedelta, timezone
+    dt = datetime.now(timezone.utc) - timedelta(hours=3)
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+def format_record(record):
+    """Formats raw Plaud payload to match database schema."""
+    formatted = record.copy()
+    
+    # Filesize to MB - Ensure it's handled, but Plaud CLI might not provide it yet
+    if 'filesize' in record:
+        formatted['filesize_mb'] = round(record['filesize'] / (1024 * 1024), 2)
+        del formatted['filesize']
+    elif 'filesize_mb' not in formatted:
+        formatted['filesize_mb'] = 0.0
+        
+    # Duration to HH:MM:SS
+    if 'duration' in record and isinstance(record['duration'], int):
+        formatted['duration'] = format_duration(record['duration'])
+        
+    # Start time to UTC-3 string
+    if 'start_time' in record and isinstance(record['start_time'], (int, float)):
+        from datetime import datetime, timedelta, timezone
+        dt = datetime.fromtimestamp(record['start_time'], tz=timezone.utc)
+        dt_brazil = dt - timedelta(hours=3)
+        formatted['start_time'] = dt_brazil.strftime('%Y-%m-%d %H:%M:%S')
+        
+    # Auto-fill timestamps for flags
+    for flag, ts_field in [('downloaded', 'downloaded_at'), 
+                           ('transcribed', 'transcribed_at'), 
+                           ('analyzed', 'analyzed_at')]:
+        if formatted.get(flag) == 1 and not formatted.get(ts_field):
+            formatted[ts_field] = get_now_utc3()
+            
+    return formatted
 
 def update_record(conn, record):
     cursor = conn.cursor()
+    
+    # Format the record before processing
+    record = format_record(record)
+    
     id = record.get('id')
     if not id:
         return
@@ -60,7 +123,15 @@ def get_record(conn, id):
     return None
 
 if __name__ == "__main__":
-    db_path = os.environ.get('DATABASE_URL', 'plaud_records.db').replace('sqlite://', '')
+    # Get the project root directory (one level up from scripts/)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_db = os.path.join(project_root, 'data', 'plaud_records.db')
+    
+    db_path = os.environ.get('DATABASE_URL', default_db).replace('sqlite://', '')
+    
+    # Ensure data directory exists
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    
     conn = init_db(db_path)
     
     if len(sys.argv) < 2:
@@ -80,7 +151,7 @@ if __name__ == "__main__":
         print(json.dumps(record))
     elif cmd == 'list':
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM recordings ORDER BY date DESC')
+        cursor.execute('SELECT * FROM recordings ORDER BY start_time DESC')
         rows = cursor.fetchall()
         columns = [column[0] for column in cursor.description]
         results = [dict(zip(columns, row)) for row in rows]

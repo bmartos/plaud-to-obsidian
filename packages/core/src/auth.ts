@@ -1,8 +1,7 @@
-import { PlaudConfig } from './config.js';
-import { BASE_URLS } from './types.js';
-import type { PlaudTokenData } from './types.js';
+import { PlaudConfig } from './config';
+import type { PlaudSession } from './types';
 
-const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+const SESSION_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 export class PlaudAuth {
   private config: PlaudConfig;
@@ -11,15 +10,15 @@ export class PlaudAuth {
     this.config = config;
   }
 
-  async getToken(): Promise<string> {
-    const cached = this.config.getToken();
+  async getSessionId(): Promise<string> {
+    const cached = this.config.getSession();
     if (cached && !this.isExpiringSoon(cached)) {
-      return cached.accessToken;
+      return cached.sessionId;
     }
-    throw new Error('Plaud token expired or not found. Please run `plaud login` again.');
+    throw new Error('Plaud session expired or not found. Please run `plaud login` again.');
   }
 
-  private isExpiringSoon(token: PlaudTokenData): boolean {
-    return Date.now() + TOKEN_REFRESH_BUFFER_MS > token.expiresAt;
+  private isExpiringSoon(session: PlaudSession): boolean {
+    return Date.now() + SESSION_REFRESH_BUFFER_MS > session.expiresAt;
   }
 }

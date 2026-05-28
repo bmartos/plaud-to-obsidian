@@ -1,11 +1,6 @@
-import { PlaudAuth } from './auth.js';
-import { BASE_URLS } from './types.js';
-import type { PlaudRecording, PlaudRecordingDetail, PlaudUserInfo } from './types.js';
-
-export const BASE_URLS: Record<string, string> = {
-  us: 'https://platform.plaud.ai/developer/api',
-  eu: 'https://platform.plaud.ai/developer/api',
-};
+import { PlaudAuth } from './auth';
+import { BASE_URLS } from './types';
+import type { PlaudRecording, PlaudRecordingDetail, PlaudUserInfo } from './types';
 
 export class PlaudClient {
   private auth: PlaudAuth;
@@ -23,7 +18,7 @@ export class PlaudClient {
   private async request(path: string, options?: RequestInit, attempts: number = 0): Promise<any> {
     if (attempts > 2) throw new Error('Too many region redirect attempts');
     
-    const token = await this.auth.getToken();
+    const sessionId = await this.auth.getSessionId();
     const url = `${this.baseUrl}${path}`;
     
     console.log(`[DEBUG] Requesting: ${url}`);
@@ -36,7 +31,7 @@ export class PlaudClient {
         ...options,
         signal: controller.signal,
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${sessionId}`,
           'Content-Type': 'application/json',
           ...options?.headers,
         },
