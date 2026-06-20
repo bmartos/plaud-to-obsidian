@@ -250,45 +250,45 @@ Detalhes: ${result.error}`);
           </div>
         </div>
 
-        {/* Barra de Progresso e Carregamento Geral */}
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                Progresso de Sincronização
-                {isAnyProcessing && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 animate-pulse border border-blue-100">
-                    Processando...
-                  </span>
-                )}
-                {syncing && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600 animate-pulse border border-indigo-100">
-                    Sincronizando nuvem...
-                  </span>
-                )}
-              </h3>
-              <p className="text-xs text-slate-500 font-medium">Percentual de conclusão local da sua biblioteca Plaud (Áudio + Transcrição + Resumos)</p>
+        {/* Barra de Progresso e Carregamento Geral (exibida apenas quando houver atividade) */}
+        {(isAnyProcessing || syncing) && (
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4 animate-in fade-in duration-300">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  Progresso de Sincronização
+                  {isAnyProcessing && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 animate-pulse border border-blue-100">
+                      Processando...
+                    </span>
+                  )}
+                  {syncing && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600 animate-pulse border border-indigo-100">
+                      Sincronizando nuvem...
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">Percentual de conclusão local da sua biblioteca Plaud (Áudio + Transcrição + Resumos)</p>
+              </div>
+              <div className="text-left md:text-right">
+                <span className="text-3xl font-black text-blue-600">{totalProgress}%</span>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{syncedCount} de {totalFiles} concluídos</p>
+              </div>
             </div>
-            <div className="text-left md:text-right">
-              <span className="text-3xl font-black text-blue-600">{totalProgress}%</span>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{syncedCount} de {totalFiles} concluídos</p>
+
+            <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden relative border border-slate-200/50">
+              <div 
+                className={`h-full rounded-full transition-all duration-1000 ease-out shadow-inner ${
+                  syncing || isAnyProcessing 
+                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 bg-[length:200%_auto] animate-shimmer' 
+                    : 'bg-gradient-to-r from-blue-500 to-indigo-600'
+                }`} 
+                style={{ width: `${totalProgress}%` }}
+              />
             </div>
-          </div>
 
-          <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden relative border border-slate-200/50">
-            <div 
-              className={`h-full rounded-full transition-all duration-1000 ease-out shadow-inner ${
-                syncing || isAnyProcessing 
-                  ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 bg-[length:200%_auto] animate-shimmer' 
-                  : 'bg-gradient-to-r from-blue-500 to-indigo-600'
-              }`} 
-              style={{ width: `${totalProgress}%` }}
-            />
-          </div>
-
-          {/* Indicador de Tarefas Ativas em Segundo Plano */}
-          {(isAnyProcessing || syncing) && (
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+            {/* Indicador de Tarefas Ativas em Segundo Plano */}
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Fila de Tarefas Ativas</span>
               <div className="space-y-2">
                 {syncing && (
@@ -328,8 +328,8 @@ Detalhes: ${result.error}`);
                 ))}
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
