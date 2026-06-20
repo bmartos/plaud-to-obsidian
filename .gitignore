@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 dist/
 
@@ -20,3 +20,15 @@ npm-debug.log*
 # Private Data (Obsidian)
 # Ignoramos o conteúdo, mas mantemos a estrutura se desejar
 packages/core/test/fixtures/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Test Results & Reports
+test-results/
+playwright-report/
+.last-run.json
+
+# Local database directory
+data/
