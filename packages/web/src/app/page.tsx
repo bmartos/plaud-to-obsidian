@@ -115,71 +115,94 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 font-sans text-slate-900">
-      <div className="max-w-4xl w-full bg-white rounded-3xl shadow-2xl p-10 border border-slate-200">
-        <header className="mb-10 text-center">
-          <h1 className="text-4xl font-black tracking-tight mb-2">PlaudToObsidian</h1>
-          <p className="text-slate-500 font-medium small uppercase tracking-tighter">Pipeline de Notas com IA</p>
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-10 border border-slate-200 animate-in fade-in duration-700">
+        <header className="mb-8 text-center">
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-blue-600 shadow-inner">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          </div>
+          <h1 className="text-3xl font-black tracking-tight mb-1 bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">PlaudToObsidian</h1>
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Sincronizador Inteligente</p>
         </header>
 
-        <div className="space-y-8 animate-in fade-in duration-500">
-          {/* Instrução */}
-          <div className="bg-blue-50 rounded-2xl p-6 border border-blue-100 flex items-center gap-4">
-             <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white shrink-0">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" /></svg>
-             </div>
-             <div>
-                <h2 className="font-bold text-blue-900">Conectar Conta</h2>
-                <p className="text-blue-700 text-sm">Siga os passos abaixo para autorizar o acesso aos seus áudios.</p>
-             </div>
+        <div className="space-y-6">
+          {/* Instruções do Fluxo */}
+          <div className="bg-slate-50 border border-slate-100 rounded-2xl p-5 space-y-4">
+            <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider">Etapas da Conexão</h3>
+            
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                  loading === 'install' ? 'bg-blue-600 text-white animate-pulse shadow-md shadow-blue-200' :
+                  loading === 'login' || status?.type === 'success' ? 'bg-green-100 text-green-600' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {loading === 'login' || status?.type === 'success' ? '✓' : '1'}
+                </div>
+                <span className={`text-xs font-medium transition-colors ${loading === 'install' ? 'text-blue-600 font-bold' : 'text-slate-500'}`}>
+                  Instalar ferramentas CLI da Plaud
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                  loading === 'login' ? 'bg-blue-600 text-white animate-pulse shadow-md shadow-blue-200' :
+                  status?.type === 'success' ? 'bg-green-100 text-green-600' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {status?.type === 'success' ? '✓' : '2'}
+                </div>
+                <span className={`text-xs font-medium transition-colors ${loading === 'login' ? 'text-blue-600 font-bold' : 'text-slate-500'}`}>
+                  Autorizar acesso no navegador
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* Grid de Ações */}
-          <div className="grid gap-4 sm:grid-cols-3">
+          {/* Botão de Ação Principal */}
+          <div className="flex flex-col gap-3">
             <button
               onClick={() => handleAction('install', installPlaudCli)}
               disabled={!!loading}
-              className="flex flex-col items-center justify-center p-6 rounded-2xl border-2 border-slate-100 bg-white hover:bg-slate-50 hover:border-blue-500 transition-all group disabled:opacity-50"
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-6 rounded-2xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:transform-none disabled:shadow-none flex items-center justify-center gap-3"
             >
-              <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
-                <svg className="w-5 h-5 text-slate-600 group-hover:text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              </div>
-              <span className="font-bold text-slate-700 text-sm">1. Instalar CLI</span>
+              {loading === 'install' ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <span>Instalando ferramentas...</span>
+                </>
+              ) : loading === 'login' ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <span>Aguardando autenticação...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" /></svg>
+                  <span>Conectar Conta Plaud</span>
+                </>
+              )}
             </button>
 
-            <button
-              onClick={() => handleAction('login', loginPlaudCli)}
-              disabled={!!loading}
-              className="flex flex-col items-center justify-center p-6 rounded-2xl border-2 border-slate-100 bg-white hover:bg-slate-50 hover:border-green-500 transition-all group disabled:opacity-50"
-            >
-              <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-green-100 transition-colors">
-                <svg className="w-5 h-5 text-slate-600 group-hover:text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" /></svg>
-              </div>
-              <span className="font-bold text-slate-700 text-sm">2. Fazer Login</span>
-            </button>
-
-            <button
-              onClick={() => handleAction('validate', validatePlaudLogin)}
-              disabled={!!loading}
-              className="flex flex-col items-center justify-center p-6 rounded-2xl border-2 border-slate-100 bg-white hover:bg-slate-50 hover:border-purple-500 transition-all group disabled:opacity-50"
-            >
-              <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-purple-100 transition-colors">
-                <svg className="w-5 h-5 text-slate-600 group-hover:text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              </div>
-              <span className="font-bold text-slate-700 text-sm">3. Validar Login</span>
-            </button>
+            {/* Atalho Secundário */}
+            {!loading && (
+              <button
+                onClick={() => handleAction('login', loginPlaudCli)}
+                className="text-slate-400 hover:text-slate-600 text-[10px] font-bold uppercase tracking-wider transition-colors mx-auto mt-2"
+              >
+                Apenas autenticar (pular instalação)
+              </button>
+            )}
           </div>
         </div>
 
         {/* Feedback Area */}
         {status && (
-          <div className={`mt-8 p-4 rounded-xl border flex items-start space-x-3 animate-in slide-in-from-top-2 ${
-            status.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 
-            status.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'
+          <div className={`mt-6 p-4 rounded-2xl border flex items-start space-x-3 animate-in slide-in-from-top-2 ${
+            status.type === 'success' ? 'bg-green-50 border-green-100 text-green-800' : 
+            status.type === 'error' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-blue-50 border-blue-100 text-blue-800'
           }`}>
             <div className="flex-1">
               <p className="text-xs font-bold">{status.message}</p>
               {status.details && (
-                <pre className="mt-2 text-[10px] overflow-auto max-h-24 bg-white/50 p-2 rounded font-mono">
+                <pre className="mt-2 text-[10px] overflow-auto max-h-24 bg-white/50 p-2 rounded-lg font-mono">
                   {status.details}
                 </pre>
               )}
@@ -187,8 +210,8 @@ export default function Home() {
           </div>
         )}
 
-        <footer className="mt-10 pt-6 border-t border-slate-50 text-center">
-          <a href="https://docs.plaud.ai" target="_blank" className="text-[10px] font-bold text-slate-300 hover:text-slate-500 uppercase tracking-widest transition-colors">
+        <footer className="mt-8 pt-6 border-t border-slate-100 text-center">
+          <a href="https://docs.plaud.ai" target="_blank" className="text-[9px] font-bold text-slate-300 hover:text-slate-400 uppercase tracking-widest transition-colors">
             Documentação Oficial
           </a>
         </footer>
