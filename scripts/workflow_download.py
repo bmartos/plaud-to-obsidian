@@ -5,6 +5,7 @@ import re
 import requests
 import json
 from datetime import datetime, timezone, timedelta
+import time
 
 # Add scripts directory to path to import db_manager
 sys.path.append(os.path.join(os.path.dirname(__file__)))
@@ -287,23 +288,78 @@ def workflow_sync_and_download(download_assets=False):
             }
             db_manager.update_record(conn, payload)
             
-            if not download_assets:
-                print(f"  [OK] Metadata registered for {file_id} (Assets skipped)")
+            print(f"  [OK] Metadata registered for {file_id}")
+
+        # --- (4) & (5) Check pending transcripts and summaries on Plaud Cloud and download if available ---
+        print("\nChecking for missing transcripts/summaries in the local database...")
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, fullname, start_time, transcribed, analyzed FROM recordings WHERE transcribed = 0 OR analyzed = 0")
+        pending_records = cursor.fetchall()
+        
+        print(f"Found {len(pending_records)} recording(s) with pending transcripts or summaries.")
+        
+        for record_item in pending_records:
+            file_id, fullname, start_time, transcribed, analyzed = record_item
+            
+            print(f"[*] Checking assets on cloud for: {fullname} ({file_id})")
+            
+            # Pequeno delay para evitar sobrecarga de processos Node/libuv no Windows
+            time.sleep(0.8)
+            
+            detail_res = run_plaud_command(["file", file_id], env)
+            if detail_res.returncode != 0:
+                print(f"  [Error] Failed to fetch details for {file_id}. Stderr: {detail_res.stderr}")
                 continue
-
-            # --- Remaining logic for downloading assets (if download_assets is True) ---
-            # This part is more complex and depends on the specific logic for `download_asset`
-            # For now, let's just ensure the metadata sync part is working and the status is correct.
-            # The download_assets=True path is for future expansion or specific CLI usage.
-
-            # We would typically re-fetch the record after metadata sync to get the latest status
-            # For this sync, we just ensure the initial registration is correct.
+                
+            output = detail_res.stdout
+            
+            # Helper to extract values from the detailed file output
+            def get_val_local(pattern):
+                m = re.search(pattern, output)
+                return m.group(1).strip() if m else None
+                
+            cloud_has_trans = 1 if get_val_local(r'transcript:\s+(.*)') == "available" else 0
+            cloud_has_sum = 1 if get_val_local(r'summary:\s+(.*)') == "available" else 0
+            
+            updates = {}
+            
+            # Check Transcript: If false locally, check if available on cloud to download
+            if transcribed == 0:
+                if cloud_has_trans == 1:
+                    target_filename = get_target_filename(file_id, fullname, start_time, ext=".md")
+                    print(f"  [+] Transcript is available on cloud. Downloading...")
+                    filepath = download_asset("transcript", file_id, target_filename, obsidian_trans_dir)
+                    if filepath:
+                        updates["transcribed"] = 1
+                        updates["transcription_path"] = filepath
+                        stats["transcribed"] += 1
+                        print(f"    [OK] Saved to {filepath}")
+                else:
+                    print("  [-] Transcript is not available on cloud yet.")
+                    
+            # Check Summary: If false locally, check if available on cloud to download
+            if analyzed == 0:
+                if cloud_has_sum == 1:
+                    target_filename = get_target_filename(file_id, fullname, start_time, ext=".md")
+                    print(f"  [+] Summary is available on cloud. Downloading...")
+                    filepath = download_asset("summary", file_id, target_filename, obsidian_sum_dir)
+                    if filepath:
+                        updates["analyzed"] = 1
+                        updates["summary_path"] = filepath
+                        stats["analyzed"] += 1
+                        print(f"    [OK] Saved to {filepath}")
+                else:
+                    print("  [-] Summary is not available on cloud yet.")
+            
+            # If assets were downloaded, update the SQLite database
+            if updates:
+                updates["id"] = file_id
+                db_manager.update_record(conn, updates)
 
         print("\nWorkflow Finished!")
         print(f"  New recordings registered: {stats['new']}")
         print(f"  Existing (skipped): {stats['existing']}")
-        if download_assets:
-            print(f"  Assets Downloaded: Audio({stats['downloaded']}), Trans({stats['transcribed']}), Sum({stats['analyzed']})")
+        print(f"  Assets Downloaded: Transcriptions({stats['transcribed']}), Summaries({stats['analyzed']})")
 
     except FileNotFoundError as e:
         print(f"Workflow Error: {e}")
