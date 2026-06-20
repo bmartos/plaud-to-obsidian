@@ -15,34 +15,53 @@ export default function Home() {
   const [loading, setLoading] = useState<string | null>('initial');
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string; details?: string } | null>(null);
 
-  // Verificação de sessão (opcionalmente redireciona se especificado)
-  const checkAuth = async (redirectOnSuccess = false) => {
+  // Verificação silenciosa inicial
+  const checkAuth = async () => {
     try {
       const userResult = await validatePlaudLogin();
-      if (userResult.success) {
-        if (redirectOnSuccess) {
-          setStatus({
-            type: 'success',
-            message: 'Autenticação realizada com sucesso!',
-            details: `Usuário conectado: ${userResult.data?.email || ''}`
-          });
-          setTimeout(() => {
-            router.push('/dashboard');
-          }, 1500);
-        } else {
-          setLoading(null);
-        }
-      } else {
-        setLoading(null);
-      }
+      setLoading(null);
     } catch (e) {
       setLoading(null);
     }
   };
 
+  // Função de Sondagem (polling) do login automático
+  const pollAuth = async (startTime: number) => {
+    // Timeout de 2 minutos (120000ms)
+    if (Date.now() - startTime > 120000) {
+      setLoading(null);
+      setStatus({
+        type: 'error',
+        message: 'Tempo limite de login esgotado.',
+        details: 'O login não foi concluído a tempo. Por favor, tente novamente.'
+      });
+      return;
+    }
+
+    try {
+      const userResult = await validatePlaudLogin();
+      if (userResult.success) {
+        setStatus({
+          type: 'success',
+          message: 'Autenticação realizada com sucesso!',
+          details: `Usuário conectado: ${userResult.data?.email || ''}`
+        });
+        setLoading(null);
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 1500);
+      } else {
+        // Tenta novamente a cada 2 segundos
+        setTimeout(() => pollAuth(startTime), 2000);
+      }
+    } catch (e) {
+      setTimeout(() => pollAuth(startTime), 2000);
+    }
+  };
+
   useEffect(() => {
     // Ao entrar na área de login, NUNCA redirecionamos automaticamente usando token guardado em cache
-    checkAuth(false);
+    checkAuth();
   }, []);
 
   const handleAction = async (name: string, action: () => Promise<any>) => {
@@ -63,8 +82,9 @@ export default function Home() {
 
         // Se for login ou validação, tentamos levar ao dashboard
         if (name === 'login') {
-          // Pequeno delay para o CLI salvar o token
-          setTimeout(() => checkAuth(true), 3000);
+          // Inicia a verificação automática periódica (polling)
+          const startTime = Date.now();
+          setTimeout(() => pollAuth(startTime), 3000);
         } else if (name === 'validate') {
           router.push('/dashboard');
         }
@@ -74,7 +94,7 @@ export default function Home() {
     } catch (e: any) {
       setStatus({ type: 'error', message: 'Ocorreu um erro inesperado.', details: e.message });
     } finally {
-      if (name !== 'validate') {
+      if (name !== 'validate' && name !== 'login') {
         setLoading(null);
       }
     }
