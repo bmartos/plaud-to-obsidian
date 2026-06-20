@@ -170,10 +170,19 @@ Detalhes: ${result.error}`);
             <p className="text-slate-500 font-medium small uppercase tracking-tighter">PlaudToObsidian Pipeline</p>
           </div>
           <div className="flex items-center gap-3">
-            {isAnyProcessing && (
+            {syncing && (
               <button 
                 onClick={handlePauseAll}
-                disabled={syncing || processingId !== null}
+                className="px-5 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 border border-rose-100 shadow-sm cursor-pointer animate-pulse"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M10 9v6m4-6v6" /></svg>
+                Cancelar Sincronização
+              </button>
+            )}
+            {!syncing && isAnyProcessing && (
+              <button 
+                onClick={handlePauseAll}
+                disabled={processingId !== null}
                 className="px-5 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 border border-rose-100 shadow-sm cursor-pointer"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M10 9v6m4-6v6" /></svg>
@@ -184,7 +193,7 @@ Detalhes: ${result.error}`);
               onClick={handleSync}
               disabled={syncing || processingId !== null || isAnyProcessing}
               className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 ${
-                syncing || processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
+                syncing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
               }`}
             >
               {syncing ? (

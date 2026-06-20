@@ -294,8 +294,8 @@ export async function pauseAllActions() {
     const projectRoot = path.resolve(process.cwd(), '../..');
     const dbPath = path.join(projectRoot, 'data', 'plaud_records.db');
 
-    // 1. Matar qualquer processo python que esteja executando process_single.py ou transcribe_local.py no Windows
-    const killCmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"Name = 'python.exe'\\" | Where-Object { $_.CommandLine -like '*process_single.py*' -or $_.CommandLine -like '*transcribe_local.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`;
+    // 1. Matar qualquer processo python que esteja executando process_single.py, transcribe_local.py ou workflow_download.py no Windows
+    const killCmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"Name = 'python.exe'\\" | Where-Object { $_.CommandLine -like '*process_single.py*' -or $_.CommandLine -like '*transcribe_local.py*' -or $_.CommandLine -like '*workflow_download.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`;
     
     console.log(`[pauseAllActions] Interrompendo todas as tarefas ativas...`);
     try {
