@@ -15,7 +15,7 @@ export default function Home() {
   const [loading, setLoading] = useState<string | null>('initial');
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string; details?: string } | null>(null);
 
-  // Verificação silenciosa inicial
+  // Verificação silenciosa inicial - NUNCA redireciona automaticamente com cache a partir do login (/)
   const checkAuth = async () => {
     try {
       const userResult = await validatePlaudLogin();
@@ -60,7 +60,6 @@ export default function Home() {
   };
 
   useEffect(() => {
-    // Ao entrar na área de login, NUNCA redirecionamos automaticamente usando token guardado em cache
     checkAuth();
   }, []);
 
@@ -80,133 +79,23 @@ export default function Home() {
           window.open(result.url, '_blank');
         }
 
-        // Se for login ou validação, tentamos levar ao dashboard
         if (name === 'login') {
-          // Inicia a verificação automática periódica (polling)
           const startTime = Date.now();
           setTimeout(() => pollAuth(startTime), 3000);
         } else if (name === 'validate') {
           router.push('/dashboard');
         } else if (name === 'install') {
-          // Passagem automática da etapa 1 (install) para a etapa 2 (login) após 1.5s
           setTimeout(() => {
             handleAction('login', loginPlaudCli);
           }, 1500);
         }
       } else {
         setStatus({ type: 'error', message: result.message, details: result.error });
+        setLoading(null);
       }
     } catch (e: any) {
       setStatus({ type: 'error', message: 'Ocorreu um erro inesperado.', details: e.message });
-    } finally {
-      if (name !== 'validate' && name !== 'login') {
-        setLoading(null);
-      }
-    }
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { installPlaudCli, loginPlaudCli, validatePlaudLogin } from './actions';
-
-/**
- * Página Home - Fluxo de Autenticação
- * 
- * Esta página gerencia as etapas iniciais para conectar o sistema ao Plaud AI.
- * Se o usuário já estiver logado, redireciona automaticamente para o Dashboard.
- */
-export default function Home() {
-  const router = useRouter();
-  const [loading, setLoading] = useState<string | null>('initial');
-  const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string; details?: string } | null>(null);
-
-  // Verificação silenciosa inicial
-  const checkAuth = async () => {
-    try {
-      const userResult = await validatePlaudLogin();
       setLoading(null);
-    } catch (e) {
-      setLoading(null);
-    }
-  };
-
-  // Função de Sondagem (polling) do login automático
-  const pollAuth = async (startTime: number) => {
-    // Timeout de 2 minutos (120000ms)
-    if (Date.now() - startTime > 120000) {
-      setLoading(null);
-      setStatus({
-        type: 'error',
-        message: 'Tempo limite de login esgotado.',
-        details: 'O login não foi concluído a tempo. Por favor, tente novamente.'
-      });
-      return;
-    }
-
-    try {
-      const userResult = await validatePlaudLogin();
-      if (userResult.success) {
-        setStatus({
-          type: 'success',
-          message: 'Autenticação realizada com sucesso!',
-          details: `Usuário conectado: ${userResult.data?.email || ''}`
-        });
-        setLoading(null);
-        setTimeout(() => {
-          router.push('/dashboard');
-        }, 1500);
-      } else {
-        // Tenta novamente a cada 2 segundos
-        setTimeout(() => pollAuth(startTime), 2000);
-      }
-    } catch (e) {
-      setTimeout(() => pollAuth(startTime), 2000);
-    }
-  };
-
-  useEffect(() => {
-    // Ao entrar na área de login, NUNCA redirecionamos automaticamente usando token guardado em cache
-    checkAuth();
-  }, []);
-
-  const handleAction = async (name: string, action: () => Promise<any>) => {
-    setLoading(name);
-    setStatus(null);
-    try {
-      const result = await action();
-      if (result.success) {
-        setStatus({ 
-          type: 'success', 
-          message: result.message, 
-          details: name === 'login' ? 'Redirecionando para a página de autenticação...' : (result.user || result.details) 
-        });
-        
-        if (result.url && name === 'login') {
-          window.open(result.url, '_blank');
-        }
-
-        // Se for login ou validação, tentamos levar ao dashboard
-        if (name === 'login') {
-          // Inicia a verificação automática periódica (polling)
-          const startTime = Date.now();
-          setTimeout(() => pollAuth(startTime), 3000);
-        } else if (name === 'validate') {
-          router.push('/dashboard');
-        } else if (name === 'install') {
-          // Passagem automática da etapa 1 (install) para a etapa 2 (login) após 1.5s
-          setTimeout(() => {
-            handleAction('login', loginPlaudCli);
-          }, 1500);
-        }
-      } else {
-        setStatus({ type: 'error', message: result.message, details: result.error });
-      }
-    } catch (e: any) {
-      setStatus({ type: 'error', message: 'Ocorreu um erro inesperado.', details: e.message });
-    } finally {
-      if (name !== 'validate' && name !== 'login') {
-        setLoading(null);
-      }
     }
   };
 
