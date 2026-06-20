@@ -15,12 +15,23 @@ export default function Home() {
   const [loading, setLoading] = useState<string | null>('initial');
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string; details?: string } | null>(null);
 
-  // Verificação inicial de sessão
-  const checkAuth = async () => {
+  // Verificação de sessão (opcionalmente redireciona se especificado)
+  const checkAuth = async (redirectOnSuccess = false) => {
     try {
       const userResult = await validatePlaudLogin();
       if (userResult.success) {
-        router.push('/dashboard');
+        if (redirectOnSuccess) {
+          setStatus({
+            type: 'success',
+            message: 'Autenticação realizada com sucesso!',
+            details: `Usuário conectado: ${userResult.data?.email || ''}`
+          });
+          setTimeout(() => {
+            router.push('/dashboard');
+          }, 1500);
+        } else {
+          setLoading(null);
+        }
       } else {
         setLoading(null);
       }
@@ -30,7 +41,8 @@ export default function Home() {
   };
 
   useEffect(() => {
-    checkAuth();
+    // Ao entrar na área de login, NUNCA redirecionamos automaticamente usando token guardado em cache
+    checkAuth(false);
   }, []);
 
   const handleAction = async (name: string, action: () => Promise<any>) => {
@@ -42,7 +54,7 @@ export default function Home() {
         setStatus({ 
           type: 'success', 
           message: result.message, 
-          details: result.url ? `URL de Login: ${result.url}` : (result.user || result.details) 
+          details: name === 'login' ? 'Redirecionando para a página de autenticação...' : (result.user || result.details) 
         });
         
         if (result.url && name === 'login') {
@@ -52,7 +64,7 @@ export default function Home() {
         // Se for login ou validação, tentamos levar ao dashboard
         if (name === 'login') {
           // Pequeno delay para o CLI salvar o token
-          setTimeout(checkAuth, 3000);
+          setTimeout(() => checkAuth(true), 3000);
         } else if (name === 'validate') {
           router.push('/dashboard');
         }

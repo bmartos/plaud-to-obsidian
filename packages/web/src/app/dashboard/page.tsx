@@ -46,15 +46,18 @@ export default function DashboardPage() {
   }, []);
 
   const handleSync = async () => {
+    console.log('handleSync called');
     setSyncing(true);
     try {
       const result = await syncRecordings();
+      console.log('syncRecordings result:', result);
       if (result.success) {
         alert('Sincronização iniciada em segundo plano!');
       } else {
         alert('Erro ao iniciar sincronização: ' + result.error);
       }
     } finally {
+      console.log('setSyncing(false) called');
       setSyncing(false);
     }
   };
@@ -64,7 +67,8 @@ export default function DashboardPage() {
     try {
       const result = await processAction(type, id);
       if (!result.success) {
-        alert(`Erro: ${result.message}\nDetalhes: ${result.error}`);
+        alert(`Erro: ${result.message}
+Detalhes: ${result.error}`);
       }
       // UI updates via polling
     } finally {
@@ -78,6 +82,14 @@ export default function DashboardPage() {
 
   // Determine if any task is globally running
   const isAnyProcessing = recordings.some(r => r.status && r.status !== 'idle' && r.status !== 'error');
+
+  console.log('Dashboard State (sync button disabled reasons):', {
+    syncing,
+    processingId,
+    isAnyProcessing,
+    recordingStatuses: recordings.map(r => ({ id: r.id, status: r.status }))
+  });
+
 
   if (loading && recordings.length === 0) {
     return (
@@ -265,8 +277,8 @@ export default function DashboardPage() {
                  ) : (
                    <tr>
                      <td colSpan={6} className="p-20 text-center">
-                        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        <div className="min-h-screen flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                         </div>
                         <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para sincronizar.</p>
                      </td>
