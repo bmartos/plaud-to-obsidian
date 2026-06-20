@@ -76,12 +76,38 @@ Detalhes: ${result.error}`);
     }
   };
 
+  // Função auxiliar para calcular progresso individual de cada arquivo (download = 33.3%, transcribe = 33.3%, analyze = 33.4%)
+  const getRecordProgress = (rec: any) => {
+    let progress = 0;
+    if (rec.downloaded) progress += 33.3;
+    else if (rec.status === 'downloading') progress += (rec.progress || 0) * 0.333;
+
+    if (rec.transcribed) progress += 33.3;
+    else if (rec.status === 'transcribing') progress += (rec.progress || 0) * 0.333;
+
+    if (rec.analyzed) progress += 33.4;
+    else if (rec.status === 'summarizing') progress += (rec.progress || 0) * 0.334;
+
+    return Math.min(Math.round(progress), 100);
+  };
+
   const totalFiles = recordings.length;
   const toTranscribe = recordings.filter(r => !r.transcribed).length;
   const toSummarize = recordings.filter(r => !r.analyzed).length;
 
+  // Contar quantos arquivos estão 100% concluídos
+  const syncedCount = recordings.filter(r => r.downloaded && r.transcribed && r.analyzed).length;
+
+  // Calcular progresso geral ponderado da biblioteca
+  const totalProgress = totalFiles > 0
+    ? Math.round(recordings.reduce((sum, rec) => sum + getRecordProgress(rec), 0) / totalFiles)
+    : 0;
+
+  // Obter gravações que estão sendo processadas no momento
+  const activeRecordings = recordings.filter(r => r.status && r.status !== 'idle' && r.status !== 'error');
+
   // Determine if any task is globally running
-  const isAnyProcessing = recordings.some(r => r.status && r.status !== 'idle' && r.status !== 'error');
+  const isAnyProcessing = activeRecordings.length > 0;
 
   console.log('Dashboard State (sync button disabled reasons):', {
     syncing,
@@ -165,6 +191,77 @@ Detalhes: ${result.error}`);
                 </div>
              </div>
           </div>
+        </div>
+
+        {/* Barra de Progresso e Carregamento Geral */}
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                Progresso de Sincronização
+                {isAnyProcessing && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 animate-pulse border border-blue-100">
+                    Processando...
+                  </span>
+                )}
+                {syncing && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600 animate-pulse border border-indigo-100">
+                    Sincronizando nuvem...
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-slate-500 font-medium">Percentual de conclusão local da sua biblioteca Plaud (Áudio + Transcrição + Resumos)</p>
+            </div>
+            <div className="text-left md:text-right">
+              <span className="text-3xl font-black text-blue-600">{totalProgress}%</span>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{syncedCount} de {totalFiles} concluídos</p>
+            </div>
+          </div>
+
+          <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden relative border border-slate-200/50">
+            <div 
+              className={`h-full rounded-full transition-all duration-1000 ease-out shadow-inner ${
+                syncing || isAnyProcessing 
+                  ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 bg-[length:200%_auto] animate-shimmer' 
+                  : 'bg-gradient-to-r from-blue-500 to-indigo-600'
+              }`} 
+              style={{ width: `${totalProgress}%` }}
+            />
+          </div>
+
+          {/* Indicador de Tarefas Ativas em Segundo Plano */}
+          {(isAnyProcessing || syncing) && (
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Fila de Tarefas Ativas</span>
+              <div className="space-y-2">
+                {syncing && (
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                    <span className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
+                      Sincronizando metadados da nuvem Plaud Cloud...
+                    </span>
+                    <span className="text-slate-400 animate-pulse">Aguardando</span>
+                  </div>
+                )}
+                {activeRecordings.map((rec) => (
+                  <div key={rec.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                      <span className="flex items-center gap-2 truncate max-w-[70%]">
+                        <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+                        {rec.filename}
+                      </span>
+                      <span className="text-blue-600 font-black">
+                        {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                      <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${rec.progress || 0}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
