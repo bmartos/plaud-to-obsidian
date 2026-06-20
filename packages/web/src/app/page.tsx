@@ -87,6 +87,11 @@ export default function Home() {
           setTimeout(() => pollAuth(startTime), 3000);
         } else if (name === 'validate') {
           router.push('/dashboard');
+        } else if (name === 'install') {
+          // Passagem automática da etapa 1 (install) para a etapa 2 (login) após 1.5s
+          setTimeout(() => {
+            handleAction('login', loginPlaudCli);
+          }, 1500);
         }
       } else {
         setStatus({ type: 'error', message: result.message, details: result.error });
