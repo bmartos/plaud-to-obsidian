@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction } from '../actions';
+import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction, pauseAction, pauseAllActions } from '../actions';
 
 export default function DashboardPage() {
   const [recordings, setRecordings] = useState<any[]>([]);
@@ -76,6 +76,42 @@ Detalhes: ${result.error}`);
     }
   };
 
+  const handlePause = async (id: string) => {
+    setProcessingId(`pause-${id}`);
+    try {
+      const result = await pauseAction(id);
+      if (result.success) {
+        // Recarregar dados imediatamente
+        const recsResult = await listRecordings();
+        if (recsResult.success) {
+          setRecordings(recsResult.data || []);
+        }
+      } else {
+        alert(`Erro ao pausar: ${result.message}`);
+      }
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handlePauseAll = async () => {
+    setSyncing(true);
+    try {
+      const result = await pauseAllActions();
+      if (result.success) {
+        // Recarregar dados imediatamente
+        const recsResult = await listRecordings();
+        if (recsResult.success) {
+          setRecordings(recsResult.data || []);
+        }
+      } else {
+        alert(`Erro ao pausar tarefas: ${result.message}`);
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // Função auxiliar para calcular progresso individual de cada arquivo (download = 33.3%, transcribe = 33.3%, analyze = 33.4%)
   const getRecordProgress = (rec: any) => {
     let progress = 0;
@@ -133,20 +169,32 @@ Detalhes: ${result.error}`);
             <h1 className="text-3xl font-black text-slate-900">Dashboard</h1>
             <p className="text-slate-500 font-medium small uppercase tracking-tighter">PlaudToObsidian Pipeline</p>
           </div>
-          <button 
-            onClick={handleSync}
-            disabled={syncing || processingId !== null || isAnyProcessing}
-            className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 ${
-              syncing || processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
-            }`}
-          >
-            {syncing ? (
-              <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-500 animate-spin rounded-full" />
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          <div className="flex items-center gap-3">
+            {isAnyProcessing && (
+              <button 
+                onClick={handlePauseAll}
+                disabled={syncing || processingId !== null}
+                className="px-5 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 border border-rose-100 shadow-sm cursor-pointer"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M10 9v6m4-6v6" /></svg>
+                Pausar Tudo
+              </button>
             )}
-            {syncing ? 'Sincronizando...' : 'Sincronizar Agora'}
-          </button>
+            <button 
+              onClick={handleSync}
+              disabled={syncing || processingId !== null || isAnyProcessing}
+              className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 ${
+                syncing || processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
+              }`}
+            >
+              {syncing ? (
+                <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-500 animate-spin rounded-full" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              )}
+              {syncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+            </button>
+          </div>
         </header>
 
         <div className="grid gap-6 md:grid-cols-3">
@@ -246,13 +294,23 @@ Detalhes: ${result.error}`);
                 {activeRecordings.map((rec) => (
                   <div key={rec.id} className="space-y-1">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span className="flex items-center gap-2 truncate max-w-[70%]">
+                      <span className="flex items-center gap-2 truncate max-w-[65%]">
                         <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
                         {rec.filename}
                       </span>
-                      <span className="text-blue-600 font-black">
-                        {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-blue-600 font-black">
+                          {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
+                        </span>
+                        <button 
+                          onClick={() => handlePause(rec.id)}
+                          disabled={processingId !== null}
+                          className="p-1 hover:bg-slate-200 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
+                          title="Pausar esta tarefa"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                        </button>
+                      </div>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                       <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${rec.progress || 0}%` }} />
@@ -301,10 +359,21 @@ Detalhes: ${result.error}`);
                            <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
                              Sim
                            </span>
-                         ) : rec.status === 'downloading' ? (
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
-                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 10}%` }}></div>
-                            </div>
+                          ) : rec.status === 'downloading' ? (
+                             <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                 <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 10}%` }}></div>
+                               </div>
+                               <button 
+                                 onClick={() => handlePause(rec.id)}
+                                 disabled={processingId !== null}
+                                 className="text-[9px] font-black text-rose-500 hover:text-rose-700 transition-colors uppercase tracking-wider flex items-center gap-0.5 cursor-pointer"
+                                 title="Pausar esta etapa"
+                               >
+                                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                                 Pausar
+                               </button>
+                             </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('download', rec.id)}
@@ -326,10 +395,21 @@ Detalhes: ${result.error}`);
                            <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
                              Sim
                            </span>
-                         ) : rec.status === 'transcribing' ? (
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
-                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 5}%` }}></div>
-                            </div>
+                          ) : rec.status === 'transcribing' ? (
+                             <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                 <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 5}%` }}></div>
+                               </div>
+                               <button 
+                                 onClick={() => handlePause(rec.id)}
+                                 disabled={processingId !== null}
+                                 className="text-[9px] font-black text-rose-500 hover:text-rose-700 transition-colors uppercase tracking-wider flex items-center gap-0.5 cursor-pointer"
+                                 title="Pausar esta etapa"
+                               >
+                                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                                 Pausar
+                               </button>
+                             </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('transcribe', rec.id)}
@@ -351,10 +431,21 @@ Detalhes: ${result.error}`);
                            <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
                              Sim
                            </span>
-                         ) : rec.status === 'summarizing' ? (
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
-                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 50}%` }}></div>
-                            </div>
+                          ) : rec.status === 'summarizing' ? (
+                             <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                 <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 50}%` }}></div>
+                               </div>
+                               <button 
+                                 onClick={() => handlePause(rec.id)}
+                                 disabled={processingId !== null}
+                                 className="text-[9px] font-black text-rose-500 hover:text-rose-700 transition-colors uppercase tracking-wider flex items-center gap-0.5 cursor-pointer"
+                                 title="Pausar esta etapa"
+                               >
+                                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                                 Pausar
+                               </button>
+                             </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('summarize', rec.id)}

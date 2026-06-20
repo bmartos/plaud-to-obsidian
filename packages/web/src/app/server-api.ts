@@ -251,6 +251,80 @@ export async function processAction(actionType: 'download' | 'transcribe' | 'sum
   }
 }
 
+export async function pauseAction(fileId: string) {
+  try {
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const dbManagerPath = path.join(projectRoot, 'scripts', 'db_manager.py');
+    const dbPath = path.join(projectRoot, 'data', 'plaud_records.db');
+
+    // 1. Matar o processo python correspondente e seus processos filhos no Windows
+    const killCmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"Name = 'python.exe'\\" | Where-Object { $_.CommandLine -like '*${fileId}*' } | ForEach-Object { $pId = $_.ProcessId; Get-CimInstance Win32_Process -Filter \\"ParentProcessId = $pId\\" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Stop-Process -Id $pId -Force }"`;
+    
+    console.log(`[pauseAction] Finalizando processos do arquivo: ${fileId}`);
+    try {
+      await execAsync(killCmd);
+    } catch (e: any) {
+      console.warn(`[pauseAction] Aviso/Erro ao tentar parar processos:`, e.message);
+    }
+
+    // 2. Atualizar o status do registro no banco SQLite para 'idle' com progresso 0
+    if (fs.existsSync(dbPath)) {
+      await new Promise<void>((resolve, reject) => {
+        const payload = JSON.stringify({ id: fileId, status: 'idle', progress: 0 });
+        const child = spawn('python', [dbManagerPath, 'update', payload], {
+          env: { ...process.env, DATABASE_URL: dbPath, PYTHONIOENCODING: 'utf-8' }
+        });
+        child.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`db_manager.py retornou código: ${code}`));
+        });
+        child.on('error', (err) => reject(err));
+      });
+    }
+
+    return { success: true, message: 'Processamento pausado com sucesso.' };
+  } catch (error: any) {
+    console.error(`Erro ao pausar gravação ${fileId}:`, error);
+    return { success: false, message: 'Erro ao pausar gravação.', error: error.message };
+  }
+}
+
+export async function pauseAllActions() {
+  try {
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const dbPath = path.join(projectRoot, 'data', 'plaud_records.db');
+
+    // 1. Matar qualquer processo python que esteja executando process_single.py ou transcribe_local.py no Windows
+    const killCmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"Name = 'python.exe'\\" | Where-Object { $_.CommandLine -like '*process_single.py*' -or $_.CommandLine -like '*transcribe_local.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`;
+    
+    console.log(`[pauseAllActions] Interrompendo todas as tarefas ativas...`);
+    try {
+      await execAsync(killCmd);
+    } catch (e: any) {
+      console.warn(`[pauseAllActions] Aviso/Erro ao matar processos globais:`, e.message);
+    }
+
+    // 2. Resetar todas as gravações no banco SQLite que não estejam 'idle' ou 'error'
+    if (fs.existsSync(dbPath)) {
+      const pythonOneLiner = `import sqlite3; conn=sqlite3.connect(r'${dbPath}'); conn.cursor().execute("UPDATE recordings SET status='idle', progress=0 WHERE status NOT IN ('idle', 'error') AND status IS NOT NULL"); conn.commit(); conn.close()`;
+      
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('python', ['-c', pythonOneLiner]);
+        child.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`Falha ao resetar status via SQLite: código ${code}`));
+        });
+        child.on('error', (err) => reject(err));
+      });
+    }
+
+    return { success: true, message: 'Todas as tarefas ativas foram pausadas.' };
+  } catch (error: any) {
+    console.error('Erro ao pausar todas as tarefas:', error);
+    return { success: false, message: 'Erro ao pausar todas as tarefas.', error: error.message };
+  }
+}
+
 export async function updateObsidianPath(newPath: string) {
   try {
     const envPath = path.join(process.cwd(), '.env');
