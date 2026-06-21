@@ -105,22 +105,30 @@ export async function logoutPlaudCli() {
 }
 
 export async function getPlaudUser() {
+  let output = '';
   try {
     const { stdout } = await execAsync(`"${OFFICIAL_PLAUD_PATH}" me`, { shell: 'cmd.exe' });
-    const info: Record<string, string> = {};
-    const lines = stdout.split('\n');
-    lines.forEach(line => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('User Info')) return;
-      const parts = trimmed.split(':');
-      if (parts.length >= 2) {
-        const key = (parts[0] || '').trim().toLowerCase();
-        const value = parts.slice(1).join(':').trim();
-        if (key && value) {
-          info[key] = value;
-        }
+    output = stdout;
+  } catch (error: any) {
+    output = (error.stdout || '') + (error.stderr || '');
+  }
+
+  const info: Record<string, string> = {};
+  const lines = output.split('\n');
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('User Info')) return;
+    const parts = trimmed.split(':');
+    if (parts.length >= 2) {
+      const key = (parts[0] || '').trim().toLowerCase();
+      const value = parts.slice(1).join(':').trim();
+      if (key && value) {
+        info[key] = value;
       }
-    });
+    }
+  });
+
+  if (info.id || info.email) {
     return {
       success: true,
       data: {
@@ -130,9 +138,9 @@ export async function getPlaudUser() {
         avatar: info.avatar || null
       }
     };
-  } catch (error: any) {
-    return { success: false, error: error.message };
   }
+
+  return { success: false, error: 'Não foi possível obter dados do usuário do CLI.' };
 }
 
 export async function validatePlaudLogin() {
@@ -200,6 +208,7 @@ export async function listRecordings() {
         id: r.id,
         filename: r.fullname || 'Sem Título',
         date_formatted: r.start_time ? r.start_time.split(' ')[0] : '',
+        start_time: r.start_time || '',
         duration_text: r.duration || '',
         is_synced: isSynced,
         downloaded: r.downloaded,
