@@ -26,7 +26,8 @@ export default function DashboardPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // States for filtering
-  const [filterDate, setFilterDate] = useState<string>('');
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
   const [filterDownload, setFilterDownload] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterTranscribe, setFilterTranscribe] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterAnalyze, setFilterAnalyze] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
@@ -210,11 +211,17 @@ export default function DashboardPage() {
 
   // Apply filters
   const filteredRecordings = recordings.filter(rec => {
-    // 1. Date filter
-    if (filterDate) {
-      if (!(rec.start_time || '').startsWith(filterDate)) {
+    // 1. Date range filter
+    if (rec.start_time) {
+      const recDate = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
+      if (filterStartDate && recDate < filterStartDate) {
         return false;
       }
+      if (filterEndDate && recDate > filterEndDate) {
+        return false;
+      }
+    } else if (filterStartDate || filterEndDate) {
+      return false;
     }
 
     // 2. Download filter
@@ -519,12 +526,22 @@ export default function DashboardPage() {
 
            {/* Filter Bar */}
            <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-6">
-             <div className="flex flex-col gap-1.5 min-w-[160px]">
-               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data de Gravação</label>
+             <div className="flex flex-col gap-1.5 min-w-[140px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Inicial</label>
                <input 
                  type="date" 
-                 value={filterDate}
-                 onChange={(e) => setFilterDate(e.target.value)}
+                 value={filterStartDate}
+                 onChange={(e) => setFilterStartDate(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
+               />
+             </div>
+
+             <div className="flex flex-col gap-1.5 min-w-[140px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Final</label>
+               <input 
+                 type="date" 
+                 value={filterEndDate}
+                 onChange={(e) => setFilterEndDate(e.target.value)}
                  className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
                />
              </div>
@@ -568,10 +585,11 @@ export default function DashboardPage() {
                </select>
              </div>
 
-             {(filterDate || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
+             {(filterStartDate || filterEndDate || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
                <button 
                  onClick={() => {
-                   setFilterDate('');
+                   setFilterStartDate('');
+                   setFilterEndDate('');
                    setFilterDownload('todos');
                    setFilterTranscribe('todos');
                    setFilterAnalyze('todos');
@@ -732,10 +750,12 @@ export default function DashboardPage() {
                  ) : (
                    <tr>
                      <td colSpan={6} className="p-20 text-center">
-                        <div className="min-h-screen flex items-center justify-center">
-                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                        <div className="min-h-[200px] flex flex-col items-center justify-center gap-3">
+                          <svg className="w-12 h-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para os filtros selecionados.</p>
                         </div>
-                        <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para os filtros selecionados.</p>
                      </td>
                    </tr>
                  )}
