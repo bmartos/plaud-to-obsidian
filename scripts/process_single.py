@@ -145,11 +145,15 @@ def main():
                 transcript_text = f.read()
                 
             prompt = f"""
-Você é um assistente especializado em organizar atas e anotações. 
-Baseado na transcrição abaixo, crie um resumo estruturado contendo:
-1. Título do assunto principal.
-2. Principais tópicos discutidos (em bullet points).
-3. Decisões tomadas ou próximos passos (Action Items).
+Você é um modelo de NLP especializado em analisar transcrições de áudio, gerar resumos executivos estruturados e extrair palavras-chave relevantes como tags para o Obsidian.
+
+Com base na transcrição abaixo, gere o resumo do documento seguindo exatamente a estrutura abaixo:
+
+1. **Tags de Indexação**: Na primeira linha do documento, escreva "Tags: " seguido de 3 a 6 tags relevantes para o conteúdo. As tags devem seguir a convenção do Obsidian: todas em letras minúsculas, sem acentos, sem caracteres especiais, utilizando hífen (-) como separador de palavras, e cada uma iniciada com o caractere '#'. Exemplo: Tags: #planejamento #sprint-review #banco-de-dados
+2. **Título**: Um título em Markdown (usando '#' no início) representando o assunto principal.
+3. **Resumo Executivo**: Uma seção iniciada por "## 🎯 Resumo Executivo" descrevendo brevemente os tópicos centrais.
+4. **Principais Tópicos**: Uma seção iniciada por "## 🗺️ Tópicos Discutidos" contendo pontos detalhados em tópicos (bullet points).
+5. **Ações/Decisões**: Uma seção iniciada por "## ✅ Action Items" com tarefas, decisões ou próximos passos identificados e seus responsáveis.
 
 Transcrição:
 {transcript_text}
