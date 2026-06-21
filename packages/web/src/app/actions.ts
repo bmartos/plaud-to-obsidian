@@ -1,5 +1,5 @@
 import { unstable_noStore } from 'next/cache';
-import { installPlaudCli as serverInstallPlaudCli, loginPlaudCli as serverLoginPlaudCli, logoutPlaudCli as serverLogoutPlaudCli, getPlaudUser as serverGetPlaudUser, validatePlaudLogin as serverValidatePlaudLogin, listRecordings as serverListRecordings, syncRecordings as serverSyncRecordings, processAction as serverProcessAction, updateObsidianPath as serverUpdateObsidianPath, pauseAction as serverPauseAction, pauseAllActions as serverPauseAllActions } from './server-api';
+import { installPlaudCli as serverInstallPlaudCli, loginPlaudCli as serverLoginPlaudCli, logoutPlaudCli as serverLogoutPlaudCli, getPlaudUser as serverGetPlaudUser, validatePlaudLogin as serverValidatePlaudLogin, listRecordings as serverListRecordings, syncRecordings as serverSyncRecordings, processAction as serverProcessAction, updateObsidianPath as serverUpdateObsidianPath, pauseAction as serverPauseAction, pauseAllActions as serverPauseAllActions, getFileContent as serverGetFileContent } from './server-api';
 
 
 /**
@@ -92,3 +92,9 @@ export async function pauseAllActions() {
   unstable_noStore();
   return serverPauseAllActions();
 }
+
+export async function getFileContent(id: string, type: 'transcription' | 'summary') {
+  unstable_noStore();
+  return serverGetFileContent(id, type);
+}
+

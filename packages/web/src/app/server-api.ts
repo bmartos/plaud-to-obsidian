@@ -374,3 +374,39 @@ export async function updateObsidianPath(newPath: string) {
     return { success: false, message: 'Erro ao atualizar caminho.', error: error.message };
   }
 }
+
+export async function getFileContent(id: string, type: 'transcription' | 'summary') {
+  try {
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const dbPath = path.join(projectRoot, 'data', 'plaud_records.db');
+    const dbManagerPath = path.join(projectRoot, 'scripts', 'db_manager.py');
+
+    const record = await new Promise<any>((resolve, reject) => {
+      const child = spawn('python', [dbManagerPath, 'get', id], {
+        env: { ...process.env, DATABASE_URL: dbPath, PYTHONIOENCODING: 'utf-8' }
+      });
+      let out = '';
+      child.stdout.on('data', (data) => out += data.toString());
+      child.on('close', (code) => {
+        if (code === 0 && out.trim()) {
+          try {
+            resolve(JSON.parse(out));
+          } catch (e) {
+            reject(new Error('Falha ao decodificar JSON do banco.'));
+          }
+        }
+        else reject(new Error('Gravação não encontrada no banco.'));
+      });
+    });
+
+    const filePath = type === 'transcription' ? record.transcription_path : record.summary_path;
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { success: false, error: `Arquivo de ${type === 'transcription' ? 'transcrição' : 'resumo'} não encontrado no disco.` };
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, content };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

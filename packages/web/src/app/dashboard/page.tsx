@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction, pauseAction, pauseAllActions } from '../actions';
+import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction, pauseAction, pauseAllActions, getFileContent } from '../actions';
 
 export default function DashboardPage() {
   const [recordings, setRecordings] = useState<any[]>([]);
@@ -13,12 +13,45 @@ export default function DashboardPage() {
     type: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
+  const [modal, setModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    type: 'audio' | 'text';
+    content: string;
+    audioUrl?: string;
+  }>({ isOpen: false, title: '', type: 'text', content: '' });
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setNotification({ message, type });
     setTimeout(() => {
       setNotification((prev) => (prev?.message === message ? null : prev));
     }, 4000);
+  };
+
+  const handleOpenModal = async (type: 'audio' | 'transcription' | 'summary', id: string, filename: string) => {
+    if (type === 'audio') {
+      setModal({
+        isOpen: true,
+        title: `Ouvindo Áudio: ${filename}`,
+        type: 'audio',
+        content: '',
+        audioUrl: `/api/audio?id=${id}`
+      });
+    } else {
+      setModal({
+        isOpen: true,
+        title: type === 'transcription' ? `Transcrição: ${filename}` : `Resumo: ${filename}`,
+        type: 'text',
+        content: 'Carregando conteúdo...'
+      });
+      
+      const result = await getFileContent(id, type);
+      if (result.success && result.content) {
+        setModal(prev => ({ ...prev, content: result.content }));
+      } else {
+        setModal(prev => ({ ...prev, content: `Erro ao carregar arquivo: ${result.error || 'Erro desconhecido.'}` }));
+      }
+    }
   };
 
   async function loadData() {
@@ -373,9 +406,12 @@ export default function DashboardPage() {
                        {/* Download Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.downloaded ? (
-                           <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
+                           <button 
+                             onClick={() => handleOpenModal('audio', rec.id, rec.filename)}
+                             className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                           >
                              Sim
-                           </span>
+                           </button>
                           ) : rec.status === 'downloading' ? (
                              <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
                                <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
@@ -409,9 +445,12 @@ export default function DashboardPage() {
                        {/* Transcribe Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.transcribed ? (
-                           <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
+                           <button 
+                             onClick={() => handleOpenModal('transcription', rec.id, rec.filename)}
+                             className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                           >
                              Sim
-                           </span>
+                           </button>
                           ) : rec.status === 'transcribing' ? (
                              <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
                                <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
@@ -445,9 +484,12 @@ export default function DashboardPage() {
                        {/* Summarize Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.analyzed ? (
-                           <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
+                           <button 
+                             onClick={() => handleOpenModal('summary', rec.id, rec.filename)}
+                             className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                           >
                              Sim
-                           </span>
+                           </button>
                           ) : rec.status === 'summarizing' ? (
                              <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
                                <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
@@ -494,6 +536,59 @@ export default function DashboardPage() {
            </div>
         </section>
       </div>
+
+      {/* Modal Component */}
+      {modal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-4xl p-8 border border-slate-100 shadow-2xl relative flex flex-col max-h-[85vh] m-4 animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+              <h2 className="text-xl font-bold text-slate-800 truncate max-w-[80%]" title={modal.title}>
+                {modal.title}
+              </h2>
+              <button 
+                onClick={() => setModal(prev => ({ ...prev, isOpen: false }))}
+                className="p-2 hover:bg-slate-50 rounded-xl text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {modal.type === 'audio' ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-6">
+                  <div className="w-20 h-20 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center animate-pulse">
+                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                  </div>
+                  <audio 
+                    src={modal.audioUrl} 
+                    controls 
+                    autoPlay
+                    className="w-full max-w-xl outline-none"
+                  />
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Streaming de áudio direto da sua máquina local</p>
+                </div>
+              ) : (
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 max-h-[60vh] overflow-y-auto whitespace-pre-wrap font-sans text-slate-700 text-sm leading-relaxed scrollbar-thin">
+                  {modal.content}
+                </div>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div className="border-t border-slate-100 pt-4 mt-6 flex justify-end">
+              <button 
+                onClick={() => setModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-sm transition-colors cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
