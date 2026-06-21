@@ -145,6 +145,23 @@ if __name__ == "__main__":
         record = json.loads(record_json)
         update_record(conn, record)
         print("Updated")
+    elif cmd == 'update_stdin':
+        record_json = sys.stdin.read()
+        # Remove BOM if present and strip whitespace/newlines
+        if record_json.startswith('\ufeff'):
+            record_json = record_json.encode('utf8')[3:].decode('utf8')
+        record_json = record_json.strip()
+        record = json.loads(record_json)
+        update_record(conn, record)
+        print("Updated via stdin")
+    elif cmd == 'update_file':
+        file_path = sys.argv[2]
+        with open(file_path, 'r', encoding='utf-8') as f:
+            record_json = f.read()
+        record = json.loads(record_json)
+        update_record(conn, record)
+        print(f"Updated from file: {file_path}")
+
     elif cmd == 'get':
         id = sys.argv[2]
         record = get_record(conn, id)

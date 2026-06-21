@@ -2,12 +2,35 @@ import os
 import sys
 import subprocess
 import sqlite3
+import re
 
 # Add scripts directory to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'scripts'))
 import db_manager
 from workflow_download import download_audio, get_target_filename
+
+def get_obsidian_path():
+    # 1. Try env variable first (passed from Next.js server actions)
+    obs_path = os.environ.get("OBSIDIAN_PLAUD_PATH")
+    if obs_path and obs_path.strip():
+        return obs_path.strip()
+
+    # 2. Try loading from packages/web/.env
+    try:
+        env_path = os.path.join(project_root, 'packages', 'web', '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        k, v = line.split('=', 1)
+                        if k.strip() == 'OBSIDIAN_PLAUD_PATH' and v.strip():
+                            return v.strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"[Warning] Failed to load path from .env: {e}", file=sys.stderr)
+
+    # 3. Fallback to default
+    return os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud')
 
 def main():
     if len(sys.argv) < 3:
@@ -57,7 +80,7 @@ def main():
             print("Error: Audio file must be downloaded first before local transcription.")
             sys.exit(1)
             
-        trans_dir = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud', 'transcription')
+        trans_dir = os.path.join(get_obsidian_path(), 'transcription')
         os.makedirs(trans_dir, exist_ok=True)
         target_filename = get_target_filename(file_id, record['fullname'], record['start_time'], ext=".md")
         trans_path = os.path.join(trans_dir, target_filename)
@@ -67,10 +90,10 @@ def main():
         db_manager.update_record(conn, {"id": file_id, "status": "transcribing", "progress": 0})
         print(f"Starting local transcription for {file_id}...")
         
-        p = subprocess.Popen(["python", script_path, record['audio_path'], "medium", trans_path], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+        p = subprocess.Popen(["python", "-u", script_path, record['audio_path'], "medium", trans_path], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
         
         for line in p.stdout:
-            print(line, end="")
+            print(line, end="", flush=True)
             if "Progresso:" in line:
                 try:
                     pct = int(re.search(r'Progresso:\s*(\d+)%', line).group(1))
@@ -122,11 +145,15 @@ def main():
                 transcript_text = f.read()
                 
             prompt = f"""
-Você é um assistente especializado em organizar atas e anotações. 
-Baseado na transcrição abaixo, crie um resumo estruturado contendo:
-1. Título do assunto principal.
-2. Principais tópicos discutidos (em bullet points).
-3. Decisões tomadas ou próximos passos (Action Items).
+Você é um modelo de NLP especializado em analisar transcrições de áudio, gerar resumos executivos estruturados e extrair palavras-chave relevantes como tags para o Obsidian.
+
+Com base na transcrição abaixo, gere o resumo do documento seguindo exatamente a estrutura abaixo:
+
+1. **Tags de Indexação**: Na primeira linha do documento, escreva "Tags: " seguido de 3 a 6 tags relevantes para o conteúdo. As tags devem seguir a convenção do Obsidian: todas em letras minúsculas, sem acentos, sem caracteres especiais, utilizando hífen (-) como separador de palavras, e cada uma iniciada com o caractere '#'. Exemplo: Tags: #planejamento #sprint-review #banco-de-dados
+2. **Título**: Um título em Markdown (usando '#' no início) representando o assunto principal.
+3. **Resumo Executivo**: Uma seção iniciada por "## 🎯 Resumo Executivo" descrevendo brevemente os tópicos centrais.
+4. **Principais Tópicos**: Uma seção iniciada por "## 🗺️ Tópicos Discutidos" contendo pontos detalhados em tópicos (bullet points).
+5. **Ações/Decisões**: Uma seção iniciada por "## ✅ Action Items" com tarefas, decisões ou próximos passos identificados e seus responsáveis.
 
 Transcrição:
 {transcript_text}
@@ -139,7 +166,7 @@ Transcrição:
             
             summary_text = response.text
             
-            sum_dir = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud', 'summary')
+            sum_dir = os.path.join(get_obsidian_path(), 'summary')
             os.makedirs(sum_dir, exist_ok=True)
             
             target_filename = get_target_filename(file_id, record['fullname'], record['start_time'], ext=".md")

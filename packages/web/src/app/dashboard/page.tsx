@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction } from '../actions';
+import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction, pauseAction, pauseAllActions, getFileContent } from '../actions';
 
 export default function DashboardPage() {
   const [recordings, setRecordings] = useState<any[]>([]);
@@ -9,6 +9,64 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
+  const [modal, setModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    type: 'audio' | 'text';
+    content: string;
+    audioUrl?: string;
+  }>({ isOpen: false, title: '', type: 'text', content: '' });
+
+  // States for sorting
+  const [sortField, setSortField] = useState<string>('start_time');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  // States for filtering
+  const [dateFilterType, setDateFilterType] = useState<string>('todos'); // 'todos' | 'hoje' | 'ontem' | '7dias' | '30dias' | 'unica' | 'periodo'
+  const [customSingleDate, setCustomSingleDate] = useState<string>(''); // YYYY-MM-DD
+  const [customStartDate, setCustomStartDate] = useState<string>(''); // YYYY-MM-DD
+  const [customEndDate, setCustomEndDate] = useState<string>(''); // YYYY-MM-DD
+  
+  const [filterDownload, setFilterDownload] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+  const [filterTranscribe, setFilterTranscribe] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+  const [filterAnalyze, setFilterAnalyze] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+
+  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => {
+      setNotification((prev) => (prev?.message === message ? null : prev));
+    }, 4000);
+  };
+
+  const handleOpenModal = async (type: 'audio' | 'transcription' | 'summary', id: string, filename: string) => {
+    if (type === 'audio') {
+      setModal({
+        isOpen: true,
+        title: `Ouvindo Áudio: ${filename}`,
+        type: 'audio',
+        content: '',
+        audioUrl: `/api/audio?id=${id}`
+      });
+    } else {
+      setModal({
+        isOpen: true,
+        title: type === 'transcription' ? `Transcrição: ${filename}` : `Resumo: ${filename}`,
+        type: 'text',
+        content: 'Carregando conteúdo...'
+      });
+      
+      const result = await getFileContent(id, type);
+      if (result.success && result.content) {
+        setModal(prev => ({ ...prev, content: result.content }));
+      } else {
+        setModal(prev => ({ ...prev, content: `Erro ao carregar arquivo: ${result.error || 'Erro desconhecido.'}` }));
+      }
+    }
+  };
 
   async function loadData() {
     setLoading(true);
@@ -46,15 +104,18 @@ export default function DashboardPage() {
   }, []);
 
   const handleSync = async () => {
+    console.log('handleSync called');
     setSyncing(true);
     try {
       const result = await syncRecordings();
+      console.log('syncRecordings result:', result);
       if (result.success) {
-        alert('Sincronização iniciada em segundo plano!');
+        showNotification('Sincronização iniciada em segundo plano!', 'success');
       } else {
-        alert('Erro ao iniciar sincronização: ' + result.error);
+        showNotification('Erro ao iniciar sincronização: ' + result.error, 'error');
       }
     } finally {
+      console.log('setSyncing(false) called');
       setSyncing(false);
     }
   };
@@ -64,7 +125,7 @@ export default function DashboardPage() {
     try {
       const result = await processAction(type, id);
       if (!result.success) {
-        alert(`Erro: ${result.message}\nDetalhes: ${result.error}`);
+        showNotification(`Erro: ${result.message}. Detalhes: ${result.error}`, 'error');
       }
       // UI updates via polling
     } finally {
@@ -72,12 +133,241 @@ export default function DashboardPage() {
     }
   };
 
+  const handlePause = async (id: string) => {
+    setProcessingId(`pause-${id}`);
+    try {
+      const result = await pauseAction(id);
+      if (result.success) {
+        // Recarregar dados imediatamente
+        const recsResult = await listRecordings();
+        if (recsResult.success) {
+          setRecordings(recsResult.data || []);
+        }
+      } else {
+        showNotification(`Erro ao pausar: ${result.message}`, 'error');
+      }
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handlePauseAll = async () => {
+    setSyncing(true);
+    try {
+      const result = await pauseAllActions();
+      if (result.success) {
+        // Recarregar dados imediatamente
+        const recsResult = await listRecordings();
+        if (recsResult.success) {
+          setRecordings(recsResult.data || []);
+        }
+      } else {
+        showNotification(`Erro ao pausar tarefas: ${result.message}`, 'error');
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Função auxiliar para calcular progresso individual de cada arquivo (download = 33.3%, transcribe = 33.3%, analyze = 33.4%)
+  const getRecordProgress = (rec: any) => {
+    let progress = 0;
+    if (rec.downloaded) progress += 33.3;
+    else if (rec.status === 'downloading') progress += (rec.progress || 0) * 0.333;
+
+    if (rec.transcribed) progress += 33.3;
+    else if (rec.status === 'transcribing') progress += (rec.progress || 0) * 0.333;
+
+    if (rec.analyzed) progress += 33.4;
+    else if (rec.status === 'summarizing') progress += (rec.progress || 0) * 0.334;
+
+    return Math.min(Math.round(progress), 100);
+  };
+
   const totalFiles = recordings.length;
   const toTranscribe = recordings.filter(r => !r.transcribed).length;
   const toSummarize = recordings.filter(r => !r.analyzed).length;
 
+  // Contar quantos arquivos estão 100% concluídos
+  const syncedCount = recordings.filter(r => r.downloaded && r.transcribed && r.analyzed).length;
+
+  // Calcular progresso geral ponderado da biblioteca
+  const totalProgress = totalFiles > 0
+    ? Math.round(recordings.reduce((sum, rec) => sum + getRecordProgress(rec), 0) / totalFiles)
+    : 0;
+
+  // Obter gravações que estão sendo processadas no momento
+  const activeRecordings = recordings.filter(r => r.status && r.status !== 'idle' && r.status !== 'error');
+
   // Determine if any task is globally running
-  const isAnyProcessing = recordings.some(r => r.status && r.status !== 'idle' && r.status !== 'error');
+  const isAnyProcessing = activeRecordings.length > 0;
+
+  // Sorting handler
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'start_time' ? 'desc' : 'asc');
+    }
+  };
+
+  // Apply filters
+  const filteredRecordings = recordings.filter(rec => {
+    // 1. Date filter (Dropdown mapped logic)
+    if (dateFilterType !== 'todos') {
+      if (!rec.start_time) return false;
+      const recDateStr = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
+      
+      // Get current dates using local timezone comparison values
+      const getLocalDateStr = (offsetDays = 0): string => {
+        const d = new Date();
+        if (offsetDays !== 0) {
+          d.setDate(d.getDate() + offsetDays);
+        }
+        return d.toLocaleDateString('en-CA'); // Returns "YYYY-MM-DD" in local timezone
+      };
+
+      if (dateFilterType === 'hoje') {
+        const todayStr = getLocalDateStr();
+        if (recDateStr !== todayStr) return false;
+      } 
+      else if (dateFilterType === 'ontem') {
+        const yesterdayStr = getLocalDateStr(-1);
+        if (recDateStr !== yesterdayStr) return false;
+      } 
+      else if (dateFilterType === '7dias') {
+        const limitStr = getLocalDateStr(-7);
+        if (recDateStr < limitStr) return false;
+      } 
+      else if (dateFilterType === '30dias') {
+        const limitStr = getLocalDateStr(-30);
+        if (recDateStr < limitStr) return false;
+      } 
+      else if (dateFilterType === 'unica') {
+        if (customSingleDate && recDateStr !== customSingleDate) return false;
+      } 
+      else if (dateFilterType === 'periodo') {
+        if (customStartDate && recDateStr < customStartDate) return false;
+        if (customEndDate && recDateStr > customEndDate) return false;
+      }
+    }
+
+    // 2. Download filter
+    if (filterDownload !== 'todos') {
+      const isDownloaded = rec.downloaded === 1;
+      if (filterDownload === 'sim' && !isDownloaded) return false;
+      if (filterDownload === 'nao' && isDownloaded) return false;
+    }
+
+    // 3. Transcribe filter
+    if (filterTranscribe !== 'todos') {
+      const isTranscribed = rec.transcribed === 1;
+      if (filterTranscribe === 'sim' && !isTranscribed) return false;
+      if (filterTranscribe === 'nao' && isTranscribed) return false;
+    }
+
+    // 4. Summarize filter
+    if (filterAnalyze !== 'todos') {
+      const isAnalyzed = rec.analyzed === 1;
+      if (filterAnalyze === 'sim' && !isAnalyzed) return false;
+      if (filterAnalyze === 'nao' && isAnalyzed) return false;
+    }
+
+    return true;
+  });
+
+  // Compute sorted recordings
+  const sortedRecordings = [...filteredRecordings].sort((a, b) => {
+    let valA = '';
+    let valB = '';
+
+    switch (sortField) {
+      case 'start_time':
+        valA = a.start_time || '';
+        valB = b.start_time || '';
+        break;
+      case 'filename':
+        valA = a.filename || '';
+        valB = b.filename || '';
+        break;
+      case 'duration':
+        valA = a.duration_text || '';
+        valB = b.duration_text || '';
+        break;
+      case 'downloaded':
+        valA = a.downloaded ? 'Sim' : 'Não';
+        valB = b.downloaded ? 'Sim' : 'Não';
+        break;
+      case 'transcribed':
+        valA = a.transcribed ? 'Sim' : 'Não';
+        valB = b.transcribed ? 'Sim' : 'Não';
+        break;
+      case 'analyzed':
+        valA = a.analyzed ? 'Sim' : 'Não';
+        valB = b.analyzed ? 'Sim' : 'Não';
+        break;
+      default:
+        valA = a.start_time || '';
+        valB = b.start_time || '';
+    }
+
+    if (sortField === 'start_time') {
+      const timeA = new Date(valA.replace(/-/g, '/')).getTime();
+      const timeB = new Date(valB.replace(/-/g, '/')).getTime();
+      const numA = isNaN(timeA) ? 0 : timeA;
+      const numB = isNaN(timeB) ? 0 : timeB;
+      return sortDirection === 'asc' ? numA - numB : numB - numA;
+    }
+
+    return sortDirection === 'asc' 
+      ? valA.localeCompare(valB, 'pt-BR', { sensitivity: 'base' })
+      : valB.localeCompare(valA, 'pt-BR', { sensitivity: 'base' });
+  });
+
+  const renderHeader = (field: string, label: string, isCenter = false) => {
+    const isActive = sortField === field;
+    return (
+      <button
+        onClick={() => handleSort(field)}
+        className={`group w-full flex items-center gap-1 hover:text-slate-700 transition-colors uppercase font-black tracking-widest text-[10px] cursor-pointer focus:outline-none ${isCenter ? 'justify-center' : 'justify-start'}`}
+        title={
+          isActive 
+            ? (sortDirection === 'asc' 
+                ? (field === 'start_time' ? 'Ordenado por Mais Antigo' : 'Ordenado de A-Z')
+                : (field === 'start_time' ? 'Ordenado por Mais Novo' : 'Ordenado de Z-A'))
+            : `Ordenar por ${label}`
+        }
+      >
+        <span>{label}</span>
+        <span className={`inline-flex items-center transition-all duration-200 ${isActive ? 'text-blue-600 opacity-100' : 'text-slate-300 opacity-0 group-hover:opacity-100'}`}>
+          {isActive ? (
+            sortDirection === 'asc' ? (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+              </svg>
+            )
+          ) : (
+            <svg className="w-3 h-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+            </svg>
+          )}
+        </span>
+      </button>
+    );
+  };
+
+  console.log('Dashboard State (sync button disabled reasons):', {
+    syncing,
+    processingId,
+    isAnyProcessing,
+    recordingStatuses: recordings.map(r => ({ id: r.id, status: r.status }))
+  });
+
 
   if (loading && recordings.length === 0) {
     return (
@@ -89,26 +379,67 @@ export default function DashboardPage() {
 
   return (
     <main className="p-8 font-sans">
+      {/* Toast Notification (System Message) */}
+      {notification && (
+        <div className={`fixed top-6 right-6 z-50 p-4 rounded-2xl shadow-2xl border flex items-center gap-3 animate-in slide-in-from-top-5 fade-in duration-300 ${
+          notification.type === 'success' 
+            ? 'bg-green-50 text-green-800 border-green-200' 
+            : notification.type === 'error'
+            ? 'bg-rose-50 text-rose-800 border-rose-200'
+            : 'bg-blue-50 text-blue-800 border-blue-200'
+        }`}>
+          <span className="text-sm font-semibold">{notification.message}</span>
+          <button 
+            onClick={() => setNotification(null)}
+            className="p-1 hover:bg-black/5 rounded-lg text-slate-500 hover:text-slate-700 transition-colors cursor-pointer"
+            title="Fechar"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto space-y-8">
         <header className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-black text-slate-900">Dashboard</h1>
             <p className="text-slate-500 font-medium small uppercase tracking-tighter">PlaudToObsidian Pipeline</p>
           </div>
-          <button 
-            onClick={handleSync}
-            disabled={syncing || processingId !== null || isAnyProcessing}
-            className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 ${
-              syncing || processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
-            }`}
-          >
-            {syncing ? (
-              <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-500 animate-spin rounded-full" />
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          <div className="flex items-center gap-3">
+            {syncing && (
+              <button 
+                onClick={handlePauseAll}
+                className="px-5 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 border border-rose-100 shadow-sm cursor-pointer animate-pulse"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M10 9v6m4-6v6" /></svg>
+                Cancelar Sincronização
+              </button>
             )}
-            {syncing ? 'Sincronizando...' : 'Sincronizar Agora'}
-          </button>
+            {!syncing && isAnyProcessing && (
+              <button 
+                onClick={handlePauseAll}
+                disabled={processingId !== null}
+                className="px-5 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 border border-rose-100 shadow-sm cursor-pointer"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M10 9v6m4-6v6" /></svg>
+                Pausar Tudo
+              </button>
+            )}
+            <button 
+              onClick={handleSync}
+              disabled={syncing || processingId !== null || isAnyProcessing}
+              className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2 ${
+                syncing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : processingId !== null || isAnyProcessing ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
+              }`}
+            >
+              {syncing ? (
+                <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-500 animate-spin rounded-full" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              )}
+              {syncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+            </button>
+          </div>
         </header>
 
         <div className="grid gap-6 md:grid-cols-3">
@@ -155,27 +486,204 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Fila de Tarefas Ativas (exibida apenas quando houver atividade) */}
+        {(isAnyProcessing || syncing) && (
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4 animate-in fade-in duration-300">
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                Fila de Tarefas Ativas
+                {isAnyProcessing && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 animate-pulse border border-blue-100">
+                    Processando...
+                  </span>
+                )}
+                {syncing && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600 animate-pulse border border-indigo-100">
+                    Sincronizando nuvem...
+                  </span>
+                )}
+              </h3>
+            </div>
+
+            <div className="space-y-4">
+              {syncing && (
+                <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                  <span className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
+                    Sincronizando metadados da nuvem Plaud Cloud...
+                  </span>
+                  <span className="text-slate-400 animate-pulse">Aguardando</span>
+                </div>
+              )}
+              {activeRecordings.map((rec) => (
+                <div key={rec.id} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span className="flex items-center gap-2 truncate max-w-[65%]">
+                      <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+                      {rec.filename}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-blue-600 font-black">
+                        {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
+                      </span>
+                      <button 
+                        onClick={() => handlePause(rec.id)}
+                        disabled={processingId !== null}
+                        className="p-1 hover:bg-slate-100 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
+                        title="Pausar esta tarefa"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden border border-slate-200/50">
+                    <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${rec.progress || 0}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <h2 className="font-black text-slate-800">Suas Gravações (Plaud Cloud)</h2>
-              <span className="text-[10px] font-bold text-slate-400 uppercase">{recordings.length} arquivos encontrados</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                {filteredRecordings.length} de {recordings.length} arquivos encontrados
+              </span>
+           </div>
+
+           {/* Filter Bar */}
+           <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-6">
+             <div className="flex flex-col gap-1.5 min-w-[180px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Período de Gravação</label>
+               <select
+                 value={dateFilterType}
+                 onChange={(e) => setDateFilterType(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
+               >
+                 <option value="todos">Todos os Períodos</option>
+                 <option value="hoje">Hoje</option>
+                 <option value="ontem">Ontem</option>
+                 <option value="7dias">Últimos 7 dias</option>
+                 <option value="30dias">Últimos 30 dias</option>
+                 <option value="unica">Selecionar Data Única...</option>
+                 <option value="periodo">Selecionar Intervalo de Datas...</option>
+               </select>
+             </div>
+
+             {/* Graphical picker for custom single date */}
+             {dateFilterType === 'unica' && (
+               <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
+                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data do Arquivo</label>
+                 <input 
+                   type="date" 
+                   value={customSingleDate}
+                   onChange={(e) => setCustomSingleDate(e.target.value)}
+                   className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
+                 />
+               </div>
+             )}
+
+             {/* Graphical picker for custom date range */}
+             {dateFilterType === 'periodo' && (
+               <>
+                 <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
+                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Inicial</label>
+                   <input 
+                     type="date" 
+                     value={customStartDate}
+                     onChange={(e) => setCustomStartDate(e.target.value)}
+                     className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
+                   />
+                 </div>
+                 <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
+                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Final</label>
+                   <input 
+                     type="date" 
+                     value={customEndDate}
+                     onChange={(e) => setCustomEndDate(e.target.value)}
+                     className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
+                   />
+                 </div>
+               </>
+             )}
+
+             <div className="flex flex-col gap-1.5 min-w-[120px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Download</label>
+               <select
+                 value={filterDownload}
+                 onChange={(e) => setFilterDownload(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
+               >
+                 <option value="todos">Todos</option>
+                 <option value="sim">Sim</option>
+                 <option value="nao">Não</option>
+               </select>
+             </div>
+
+             <div className="flex flex-col gap-1.5 min-w-[120px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Transcrição</label>
+               <select
+                 value={filterTranscribe}
+                 onChange={(e) => setFilterTranscribe(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
+               >
+                 <option value="todos">Todos</option>
+                 <option value="sim">Sim</option>
+                 <option value="nao">Não</option>
+               </select>
+             </div>
+
+             <div className="flex flex-col gap-1.5 min-w-[120px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Resumo</label>
+               <select
+                 value={filterAnalyze}
+                 onChange={(e) => setFilterAnalyze(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
+               >
+                 <option value="todos">Todos</option>
+                 <option value="sim">Sim</option>
+                 <option value="nao">Não</option>
+               </select>
+             </div>
+
+             {(dateFilterType !== 'todos' || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
+               <button 
+                 onClick={() => {
+                   setDateFilterType('todos');
+                   setCustomSingleDate('');
+                   setCustomStartDate('');
+                   setCustomEndDate('');
+                   setFilterDownload('todos');
+                   setFilterTranscribe('todos');
+                   setFilterAnalyze('todos');
+                 }}
+                 className="self-end px-4 py-2.5 text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-100 hover:border-rose-600 rounded-2xl transition-all cursor-pointer font-bold text-xs flex items-center gap-1.5 shadow-sm"
+               >
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                 </svg>
+                 Limpar Filtros
+               </button>
+             )}
            </div>
            
            <div className="overflow-x-auto">
              <table className="w-full text-left border-collapse">
                <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                  <tr>
-                   <th className="p-4 border-b border-slate-100 w-32">Data de Gravação</th>
-                   <th className="p-4 border-b border-slate-100 min-w-[200px]">Título</th>
-                   <th className="p-4 border-b border-slate-100 w-24">Duração</th>
-                   <th className="p-4 border-b border-slate-100 w-24 text-center">Download</th>
-                   <th className="p-4 border-b border-slate-100 w-24 text-center">Transcrição</th>
-                   <th className="p-4 border-b border-slate-100 w-24 text-center">Resumo</th>
+                   <th className="p-4 border-b border-slate-100 w-32">{renderHeader('start_time', 'Data de Gravação')}</th>
+                   <th className="p-4 border-b border-slate-100 min-w-[200px]">{renderHeader('filename', 'Título')}</th>
+                   <th className="p-4 border-b border-slate-100 w-24">{renderHeader('duration', 'Duração')}</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('downloaded', 'Download', true)}</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('transcribed', 'Transcrição', true)}</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('analyzed', 'Resumo', true)}</th>
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-50">
-                 {recordings.length > 0 ? (
-                   recordings.map((rec) => (
+                 {sortedRecordings.length > 0 ? (
+                   sortedRecordings.map((rec) => (
                      <tr key={rec.id} className="hover:bg-slate-50/50 transition-colors group">
                        <td className="p-4 text-xs font-medium text-slate-500 whitespace-nowrap">{rec.date_formatted}</td>
                        <td className="p-4">
@@ -189,13 +697,27 @@ export default function DashboardPage() {
                        {/* Download Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.downloaded ? (
-                           <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
+                           <button 
+                             onClick={() => handleOpenModal('audio', rec.id, rec.filename)}
+                             className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                           >
                              Sim
-                           </span>
-                         ) : rec.status === 'downloading' ? (
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
-                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 10}%` }}></div>
-                            </div>
+                           </button>
+                          ) : rec.status === 'downloading' ? (
+                             <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                 <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 10}%` }}></div>
+                               </div>
+                               <button 
+                                 onClick={() => handlePause(rec.id)}
+                                 disabled={processingId !== null}
+                                 className="text-[9px] font-black text-rose-500 hover:text-rose-700 transition-colors uppercase tracking-wider flex items-center gap-0.5 cursor-pointer"
+                                 title="Pausar esta etapa"
+                               >
+                                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                                 Pausar
+                               </button>
+                             </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('download', rec.id)}
@@ -214,13 +736,27 @@ export default function DashboardPage() {
                        {/* Transcribe Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.transcribed ? (
-                           <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
+                           <button 
+                             onClick={() => handleOpenModal('transcription', rec.id, rec.filename)}
+                             className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                           >
                              Sim
-                           </span>
-                         ) : rec.status === 'transcribing' ? (
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
-                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 5}%` }}></div>
-                            </div>
+                           </button>
+                          ) : rec.status === 'transcribing' ? (
+                             <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                 <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 5}%` }}></div>
+                               </div>
+                               <button 
+                                 onClick={() => handlePause(rec.id)}
+                                 disabled={processingId !== null}
+                                 className="text-[9px] font-black text-rose-500 hover:text-rose-700 transition-colors uppercase tracking-wider flex items-center gap-0.5 cursor-pointer"
+                                 title="Pausar esta etapa"
+                               >
+                                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                                 Pausar
+                               </button>
+                             </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('transcribe', rec.id)}
@@ -239,13 +775,27 @@ export default function DashboardPage() {
                        {/* Summarize Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.analyzed ? (
-                           <span className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-100">
+                           <button 
+                             onClick={() => handleOpenModal('summary', rec.id, rec.filename)}
+                             className="inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                           >
                              Sim
-                           </span>
-                         ) : rec.status === 'summarizing' ? (
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 max-w-[50px] mx-auto">
-                              <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 50}%` }}></div>
-                            </div>
+                           </button>
+                          ) : rec.status === 'summarizing' ? (
+                             <div className="flex flex-col items-center gap-1 w-full max-w-[65px] mx-auto">
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                 <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style={{ width: `${rec.progress || 50}%` }}></div>
+                               </div>
+                               <button 
+                                 onClick={() => handlePause(rec.id)}
+                                 disabled={processingId !== null}
+                                 className="text-[9px] font-black text-rose-500 hover:text-rose-700 transition-colors uppercase tracking-wider flex items-center gap-0.5 cursor-pointer"
+                                 title="Pausar esta etapa"
+                               >
+                                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                                 Pausar
+                               </button>
+                             </div>
                          ) : (
                            <button 
                              onClick={() => handleAction('summarize', rec.id)}
@@ -265,10 +815,12 @@ export default function DashboardPage() {
                  ) : (
                    <tr>
                      <td colSpan={6} className="p-20 text-center">
-                        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        <div className="min-h-[200px] flex flex-col items-center justify-center gap-3">
+                          <svg className="w-12 h-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para os filtros selecionados.</p>
                         </div>
-                        <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para sincronizar.</p>
                      </td>
                    </tr>
                  )}
@@ -277,6 +829,59 @@ export default function DashboardPage() {
            </div>
         </section>
       </div>
+
+      {/* Modal Component */}
+      {modal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-4xl p-8 border border-slate-100 shadow-2xl relative flex flex-col max-h-[85vh] m-4 animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+              <h2 className="text-xl font-bold text-slate-800 truncate max-w-[80%]" title={modal.title}>
+                {modal.title}
+              </h2>
+              <button 
+                onClick={() => setModal(prev => ({ ...prev, isOpen: false }))}
+                className="p-2 hover:bg-slate-50 rounded-xl text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {modal.type === 'audio' ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-6">
+                  <div className="w-20 h-20 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center animate-pulse">
+                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+                  </div>
+                  <audio 
+                    src={modal.audioUrl} 
+                    controls 
+                    autoPlay
+                    className="w-full max-w-xl outline-none"
+                  />
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Streaming de áudio direto da sua máquina local</p>
+                </div>
+              ) : (
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 max-h-[60vh] overflow-y-auto whitespace-pre-wrap font-sans text-slate-700 text-sm leading-relaxed scrollbar-thin">
+                  {modal.content}
+                </div>
+              )}
+            </div>
+            
+            {/* Footer */}
+            <div className="border-t border-slate-100 pt-4 mt-6 flex justify-end">
+              <button 
+                onClick={() => setModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-sm transition-colors cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

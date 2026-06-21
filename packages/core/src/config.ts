@@ -23,14 +23,40 @@ export class PlaudConfig {
       if (fs.existsSync(this.tokensPath())) {
         const raw = fs.readFileSync(this.tokensPath(), 'utf-8');
         const data = JSON.parse(raw);
+        const exp = data.expires_at || data.expiresAt;
+        const expiresAt = exp 
+          ? (exp < 10000000000 ? exp * 1000 : exp) 
+          : (Date.now() + 3600000);
         return {
           session: {
             sessionId: data.access_token || data.accessToken,
             sessionType: data.token_type || data.tokenType || 'Auth',
             issuedAt: Date.now(),
-            expiresAt: data.expires_at || data.expiresAt || (Date.now() + 3600000)
+            expiresAt
           }
         };
+      }
+
+      // Try official config.json from @plaud-ai/cli
+      const configPath = path.join(this.dir, 'config.json');
+      if (fs.existsSync(configPath)) {
+        const raw = fs.readFileSync(configPath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data.token) {
+          const t = data.token;
+          const exp = t.expires_at || t.expiresAt;
+          const expiresAt = exp 
+            ? (exp < 10000000000 ? exp * 1000 : exp) 
+            : (Date.now() + 3600000);
+          return {
+            session: {
+              sessionId: t.access_token || t.accessToken,
+              sessionType: t.token_type || t.tokenType || 'Auth',
+              issuedAt: Date.now(),
+              expiresAt
+            }
+          };
+        }
       }
     } catch (e) {
       console.error('Error loading official session:', e);

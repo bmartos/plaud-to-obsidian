@@ -4,9 +4,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-// Test only if the official tokens file exists locally
 const OFFICIAL_TOKENS = path.join(os.homedir(), '.plaud', 'tokens.json');
-const HAS_SESSION = fs.existsSync(OFFICIAL_TOKENS);
+const OFFICIAL_CONFIG = path.join(os.homedir(), '.plaud', 'config.json');
+const HAS_SESSION = fs.existsSync(OFFICIAL_TOKENS) || fs.existsSync(OFFICIAL_CONFIG);
 
 describe.skipIf(!HAS_SESSION)('integration (live API)', () => {
   const config = new PlaudConfig();

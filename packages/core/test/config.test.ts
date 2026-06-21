@@ -26,7 +26,23 @@ describe('PlaudConfig', () => {
     const config = new Config(tmpDir);
     const session = config.getSession();
     expect(session?.sessionId).toBe('abc');
-    expect(session?.expiresAt).toBe(12345);
+    expect(session?.expiresAt).toBe(12345000);
+  });
+
+  it('loads session from official config.json', () => {
+    const configFile = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configFile, JSON.stringify({
+      token: {
+        accessToken: 'xyz',
+        tokenType: 'bearer',
+        expiresAt: 54321
+      }
+    }));
+
+    const config = new Config(tmpDir);
+    const session = config.getSession();
+    expect(session?.sessionId).toBe('xyz');
+    expect(session?.expiresAt).toBe(54321000);
   });
 
   it('returns empty object when file is missing', () => {

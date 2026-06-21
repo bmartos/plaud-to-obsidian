@@ -7,7 +7,7 @@ import { logoutPlaudCli } from '../src/app/actions';
 test.describe('Fluxo de Autenticação Plaud', () => {
   
   test.beforeEach(async ({ page }) => {
-    // Garante que o servidor esteja rodando e limpa qualquer estado se necessário
+    // Garante que o processo sistêmico esteja rodando e limpa qualquer estado se necessário
     // Em um ambiente real, poderíamos chamar logout aqui, mas como é um CLI global,
     // vamos apenas navegar.
   });
