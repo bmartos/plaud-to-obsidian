@@ -15,6 +15,30 @@ if hasattr(sys.stdout, 'reconfigure'):
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 import db_manager
 
+def get_obsidian_path():
+    # 1. Try env variable first (passed from Next.js server actions)
+    obs_path = os.environ.get("OBSIDIAN_PLAUD_PATH")
+    if obs_path and obs_path.strip():
+        return obs_path.strip()
+
+    # 2. Try loading from packages/web/.env
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env_path = os.path.join(project_root, 'packages', 'web', '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        k, v = line.split('=', 1)
+                        if k.strip() == 'OBSIDIAN_PLAUD_PATH' and v.strip():
+                            return v.strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"[Warning] Failed to load path from .env: {e}", file=sys.stderr)
+
+    # 3. Fallback to default
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud')
+
 def is_same_title(db_title, list_title):
     if not db_title:
         return False
@@ -256,7 +280,7 @@ def workflow_sync_and_download(download_assets=False):
     os.makedirs(audio_dir, exist_ok=True) # Ensure audio directory exists
 
     # Target paths for Obsidian (direct publish)
-    obsidian_root = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud')
+    obsidian_root = get_obsidian_path()
     obsidian_trans_dir = os.path.join(obsidian_root, 'transcription')
     obsidian_sum_dir = os.path.join(obsidian_root, 'summary')
     os.makedirs(obsidian_trans_dir, exist_ok=True) # Ensure transcription directory exists

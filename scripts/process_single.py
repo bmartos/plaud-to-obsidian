@@ -10,6 +10,28 @@ sys.path.append(os.path.join(project_root, 'scripts'))
 import db_manager
 from workflow_download import download_audio, get_target_filename
 
+def get_obsidian_path():
+    # 1. Try env variable first (passed from Next.js server actions)
+    obs_path = os.environ.get("OBSIDIAN_PLAUD_PATH")
+    if obs_path and obs_path.strip():
+        return obs_path.strip()
+
+    # 2. Try loading from packages/web/.env
+    try:
+        env_path = os.path.join(project_root, 'packages', 'web', '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        k, v = line.split('=', 1)
+                        if k.strip() == 'OBSIDIAN_PLAUD_PATH' and v.strip():
+                            return v.strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"[Warning] Failed to load path from .env: {e}", file=sys.stderr)
+
+    # 3. Fallback to default
+    return os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud')
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: python process_single.py <action> <file_id>")
@@ -58,7 +80,7 @@ def main():
             print("Error: Audio file must be downloaded first before local transcription.")
             sys.exit(1)
             
-        trans_dir = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud', 'transcription')
+        trans_dir = os.path.join(get_obsidian_path(), 'transcription')
         os.makedirs(trans_dir, exist_ok=True)
         target_filename = get_target_filename(file_id, record['fullname'], record['start_time'], ext=".md")
         trans_path = os.path.join(trans_dir, target_filename)
@@ -140,7 +162,7 @@ Transcrição:
             
             summary_text = response.text
             
-            sum_dir = os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud', 'summary')
+            sum_dir = os.path.join(get_obsidian_path(), 'summary')
             os.makedirs(sum_dir, exist_ok=True)
             
             target_filename = get_target_filename(file_id, record['fullname'], record['start_time'], ext=".md")

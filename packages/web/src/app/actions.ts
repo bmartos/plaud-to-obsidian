@@ -1,4 +1,5 @@
 import { unstable_noStore } from 'next/cache';
+import * as path from 'path';
 import { installPlaudCli as serverInstallPlaudCli, loginPlaudCli as serverLoginPlaudCli, logoutPlaudCli as serverLogoutPlaudCli, getPlaudUser as serverGetPlaudUser, validatePlaudLogin as serverValidatePlaudLogin, listRecordings as serverListRecordings, syncRecordings as serverSyncRecordings, processAction as serverProcessAction, updateObsidianPath as serverUpdateObsidianPath, pauseAction as serverPauseAction, pauseAllActions as serverPauseAllActions, getFileContent as serverGetFileContent } from './server-api';
 
 
@@ -32,8 +33,9 @@ export async function logoutPlaudCli() {
 export async function getSettings() {
   unstable_noStore();
 
+  const defaultPath = path.join(path.dirname(path.resolve(process.cwd(), '../..')), 'Obsidian', 'plaud');
   return {
-    obsidianPath: process.env.OBSIDIAN_PLAUD_PATH || 'Não configurado',
+    obsidianPath: process.env.OBSIDIAN_PLAUD_PATH || defaultPath,
     region: process.env.PLAUD_REGION || 'eu',
   };
 }
