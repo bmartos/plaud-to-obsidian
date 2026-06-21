@@ -26,8 +26,7 @@ export default function DashboardPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // States for filtering
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [filterDateText, setFilterDateText] = useState<string>('');
   const [filterDownload, setFilterDownload] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterTranscribe, setFilterTranscribe] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterAnalyze, setFilterAnalyze] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
@@ -211,17 +210,52 @@ export default function DashboardPage() {
 
   // Apply filters
   const filteredRecordings = recordings.filter(rec => {
-    // 1. Date range filter
-    if (rec.start_time) {
-      const recDate = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
-      if (filterStartDate && recDate < filterStartDate) {
-        return false;
+    // 1. Date range or single date or search matching in filterDateText
+    if (filterDateText.trim()) {
+      const parsedDates = (() => {
+        const clean = filterDateText.trim();
+        const formatToISO = (str: string): string => {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+          const match = str.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
+          if (match) {
+            const day = match[1].padStart(2, '0');
+            const month = match[2].padStart(2, '0');
+            const year = match[3];
+            return `${year}-${month}-${day}`;
+          }
+          return '';
+        };
+
+        const rangeParts = clean.split(/\s+(?:-|a|até|to)\s+/i);
+        if (rangeParts.length === 2) {
+          const start = formatToISO(rangeParts[0].trim());
+          const end = formatToISO(rangeParts[1].trim());
+          if (start && end) return { start, end };
+        } else {
+          const single = formatToISO(clean);
+          if (single) return { start: single, end: single };
+        }
+        return null;
+      })();
+
+      if (parsedDates) {
+        if (rec.start_time) {
+          const recDate = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
+          if (recDate < parsedDates.start || recDate > parsedDates.end) {
+            return false;
+          }
+        } else {
+          return false;
+        }
+      } else {
+        // Fallback: Match as substring in start_time or date_formatted
+        const term = filterDateText.trim().toLowerCase();
+        const startMatch = (rec.start_time || '').toLowerCase().includes(term);
+        const formattedMatch = (rec.date_formatted || '').toLowerCase().includes(term);
+        if (!startMatch && !formattedMatch) {
+          return false;
+        }
       }
-      if (filterEndDate && recDate > filterEndDate) {
-        return false;
-      }
-    } else if (filterStartDate || filterEndDate) {
-      return false;
     }
 
     // 2. Download filter
@@ -526,24 +560,22 @@ export default function DashboardPage() {
 
            {/* Filter Bar */}
            <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-6">
-             <div className="flex flex-col gap-1.5 min-w-[140px]">
-               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Inicial</label>
-               <input 
-                 type="date" 
-                 value={filterStartDate}
-                 onChange={(e) => setFilterStartDate(e.target.value)}
-                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
-               />
-             </div>
-
-             <div className="flex flex-col gap-1.5 min-w-[140px]">
-               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Final</label>
-               <input 
-                 type="date" 
-                 value={filterEndDate}
-                 onChange={(e) => setFilterEndDate(e.target.value)}
-                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
-               />
+             <div className="flex flex-col gap-1.5 min-w-[280px] flex-1">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data ou Período</label>
+               <div className="relative">
+                 <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                   </svg>
+                 </span>
+                 <input 
+                   type="text" 
+                   value={filterDateText}
+                   onChange={(e) => setFilterDateText(e.target.value)}
+                   placeholder="ex: 18/06/2026 ou 18/06/2026 a 21/06/2026"
+                   className="pl-10 pr-3.5 py-2 w-full bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm"
+                 />
+               </div>
              </div>
 
              <div className="flex flex-col gap-1.5 min-w-[120px]">
@@ -551,7 +583,7 @@ export default function DashboardPage() {
                <select
                  value={filterDownload}
                  onChange={(e) => setFilterDownload(e.target.value)}
-                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer"
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
                >
                  <option value="todos">Todos</option>
                  <option value="sim">Sim</option>
@@ -564,7 +596,7 @@ export default function DashboardPage() {
                <select
                  value={filterTranscribe}
                  onChange={(e) => setFilterTranscribe(e.target.value)}
-                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer"
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
                >
                  <option value="todos">Todos</option>
                  <option value="sim">Sim</option>
@@ -577,7 +609,7 @@ export default function DashboardPage() {
                <select
                  value={filterAnalyze}
                  onChange={(e) => setFilterAnalyze(e.target.value)}
-                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer"
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
                >
                  <option value="todos">Todos</option>
                  <option value="sim">Sim</option>
@@ -585,11 +617,10 @@ export default function DashboardPage() {
                </select>
              </div>
 
-             {(filterStartDate || filterEndDate || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
+             {(filterDateText || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
                <button 
                  onClick={() => {
-                   setFilterStartDate('');
-                   setFilterEndDate('');
+                   setFilterDateText('');
                    setFilterDownload('todos');
                    setFilterTranscribe('todos');
                    setFilterAnalyze('todos');
