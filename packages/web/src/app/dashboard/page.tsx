@@ -21,6 +21,16 @@ export default function DashboardPage() {
     audioUrl?: string;
   }>({ isOpen: false, title: '', type: 'text', content: '' });
 
+  // States for sorting
+  const [sortField, setSortField] = useState<string>('start_time');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  // States for filtering
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [filterDownload, setFilterDownload] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+  const [filterTranscribe, setFilterTranscribe] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+  const [filterAnalyze, setFilterAnalyze] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setNotification({ message, type });
     setTimeout(() => {
@@ -187,6 +197,133 @@ export default function DashboardPage() {
 
   // Determine if any task is globally running
   const isAnyProcessing = activeRecordings.length > 0;
+
+  // Sorting handler
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'start_time' ? 'desc' : 'asc');
+    }
+  };
+
+  // Apply filters
+  const filteredRecordings = recordings.filter(rec => {
+    // 1. Date filter
+    if (filterDate) {
+      if (!(rec.start_time || '').startsWith(filterDate)) {
+        return false;
+      }
+    }
+
+    // 2. Download filter
+    if (filterDownload !== 'todos') {
+      const isDownloaded = rec.downloaded === 1;
+      if (filterDownload === 'sim' && !isDownloaded) return false;
+      if (filterDownload === 'nao' && isDownloaded) return false;
+    }
+
+    // 3. Transcribe filter
+    if (filterTranscribe !== 'todos') {
+      const isTranscribed = rec.transcribed === 1;
+      if (filterTranscribe === 'sim' && !isTranscribed) return false;
+      if (filterTranscribe === 'nao' && isTranscribed) return false;
+    }
+
+    // 4. Summarize filter
+    if (filterAnalyze !== 'todos') {
+      const isAnalyzed = rec.analyzed === 1;
+      if (filterAnalyze === 'sim' && !isAnalyzed) return false;
+      if (filterAnalyze === 'nao' && isAnalyzed) return false;
+    }
+
+    return true;
+  });
+
+  // Compute sorted recordings
+  const sortedRecordings = [...filteredRecordings].sort((a, b) => {
+    let valA = '';
+    let valB = '';
+
+    switch (sortField) {
+      case 'start_time':
+        valA = a.start_time || '';
+        valB = b.start_time || '';
+        break;
+      case 'filename':
+        valA = a.filename || '';
+        valB = b.filename || '';
+        break;
+      case 'duration':
+        valA = a.duration_text || '';
+        valB = b.duration_text || '';
+        break;
+      case 'downloaded':
+        valA = a.downloaded ? 'Sim' : 'Não';
+        valB = b.downloaded ? 'Sim' : 'Não';
+        break;
+      case 'transcribed':
+        valA = a.transcribed ? 'Sim' : 'Não';
+        valB = b.transcribed ? 'Sim' : 'Não';
+        break;
+      case 'analyzed':
+        valA = a.analyzed ? 'Sim' : 'Não';
+        valB = b.analyzed ? 'Sim' : 'Não';
+        break;
+      default:
+        valA = a.start_time || '';
+        valB = b.start_time || '';
+    }
+
+    if (sortField === 'start_time') {
+      const timeA = new Date(valA.replace(/-/g, '/')).getTime();
+      const timeB = new Date(valB.replace(/-/g, '/')).getTime();
+      const numA = isNaN(timeA) ? 0 : timeA;
+      const numB = isNaN(timeB) ? 0 : timeB;
+      return sortDirection === 'asc' ? numA - numB : numB - numA;
+    }
+
+    return sortDirection === 'asc' 
+      ? valA.localeCompare(valB, 'pt-BR', { sensitivity: 'base' })
+      : valB.localeCompare(valA, 'pt-BR', { sensitivity: 'base' });
+  });
+
+  const renderHeader = (field: string, label: string, isCenter = false) => {
+    const isActive = sortField === field;
+    return (
+      <button
+        onClick={() => handleSort(field)}
+        className={`group w-full flex items-center gap-1 hover:text-slate-700 transition-colors uppercase font-black tracking-widest text-[10px] cursor-pointer focus:outline-none ${isCenter ? 'justify-center' : 'justify-start'}`}
+        title={
+          isActive 
+            ? (sortDirection === 'asc' 
+                ? (field === 'start_time' ? 'Ordenado por Mais Antigo' : 'Ordenado de A-Z')
+                : (field === 'start_time' ? 'Ordenado por Mais Novo' : 'Ordenado de Z-A'))
+            : `Ordenar por ${label}`
+        }
+      >
+        <span>{label}</span>
+        <span className={`inline-flex items-center transition-all duration-200 ${isActive ? 'text-blue-600 opacity-100' : 'text-slate-300 opacity-0 group-hover:opacity-100'}`}>
+          {isActive ? (
+            sortDirection === 'asc' ? (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+              </svg>
+            )
+          ) : (
+            <svg className="w-3 h-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+            </svg>
+          )}
+        </span>
+      </button>
+    );
+  };
 
   console.log('Dashboard State (sync button disabled reasons):', {
     syncing,
@@ -375,24 +512,95 @@ export default function DashboardPage() {
         <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <h2 className="font-black text-slate-800">Suas Gravações (Plaud Cloud)</h2>
-              <span className="text-[10px] font-bold text-slate-400 uppercase">{recordings.length} arquivos encontrados</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                {filteredRecordings.length} de {recordings.length} arquivos encontrados
+              </span>
+           </div>
+
+           {/* Filter Bar */}
+           <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-6">
+             <div className="flex flex-col gap-1.5 min-w-[160px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data de Gravação</label>
+               <input 
+                 type="date" 
+                 value={filterDate}
+                 onChange={(e) => setFilterDate(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
+               />
+             </div>
+
+             <div className="flex flex-col gap-1.5 min-w-[120px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Download</label>
+               <select
+                 value={filterDownload}
+                 onChange={(e) => setFilterDownload(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer"
+               >
+                 <option value="todos">Todos</option>
+                 <option value="sim">Sim</option>
+                 <option value="nao">Não</option>
+               </select>
+             </div>
+
+             <div className="flex flex-col gap-1.5 min-w-[120px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Transcrição</label>
+               <select
+                 value={filterTranscribe}
+                 onChange={(e) => setFilterTranscribe(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer"
+               >
+                 <option value="todos">Todos</option>
+                 <option value="sim">Sim</option>
+                 <option value="nao">Não</option>
+               </select>
+             </div>
+
+             <div className="flex flex-col gap-1.5 min-w-[120px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Resumo</label>
+               <select
+                 value={filterAnalyze}
+                 onChange={(e) => setFilterAnalyze(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer"
+               >
+                 <option value="todos">Todos</option>
+                 <option value="sim">Sim</option>
+                 <option value="nao">Não</option>
+               </select>
+             </div>
+
+             {(filterDate || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
+               <button 
+                 onClick={() => {
+                   setFilterDate('');
+                   setFilterDownload('todos');
+                   setFilterTranscribe('todos');
+                   setFilterAnalyze('todos');
+                 }}
+                 className="self-end px-4 py-2.5 text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-100 hover:border-rose-600 rounded-2xl transition-all cursor-pointer font-bold text-xs flex items-center gap-1.5 shadow-sm"
+               >
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                 </svg>
+                 Limpar Filtros
+               </button>
+             )}
            </div>
            
            <div className="overflow-x-auto">
              <table className="w-full text-left border-collapse">
                <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                  <tr>
-                   <th className="p-4 border-b border-slate-100 w-32">Data de Gravação</th>
-                   <th className="p-4 border-b border-slate-100 min-w-[200px]">Título</th>
-                   <th className="p-4 border-b border-slate-100 w-24">Duração</th>
-                   <th className="p-4 border-b border-slate-100 w-24 text-center">Download</th>
-                   <th className="p-4 border-b border-slate-100 w-24 text-center">Transcrição</th>
-                   <th className="p-4 border-b border-slate-100 w-24 text-center">Resumo</th>
+                   <th className="p-4 border-b border-slate-100 w-32">{renderHeader('start_time', 'Data de Gravação')}</th>
+                   <th className="p-4 border-b border-slate-100 min-w-[200px]">{renderHeader('filename', 'Título')}</th>
+                   <th className="p-4 border-b border-slate-100 w-24">{renderHeader('duration', 'Duração')}</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('downloaded', 'Download', true)}</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('transcribed', 'Transcrição', true)}</th>
+                   <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('analyzed', 'Resumo', true)}</th>
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-50">
-                 {recordings.length > 0 ? (
-                   recordings.map((rec) => (
+                 {sortedRecordings.length > 0 ? (
+                   sortedRecordings.map((rec) => (
                      <tr key={rec.id} className="hover:bg-slate-50/50 transition-colors group">
                        <td className="p-4 text-xs font-medium text-slate-500 whitespace-nowrap">{rec.date_formatted}</td>
                        <td className="p-4">
@@ -527,7 +735,7 @@ export default function DashboardPage() {
                         <div className="min-h-screen flex items-center justify-center">
                           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                         </div>
-                        <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para sincronizar.</p>
+                        <p className="text-slate-400 font-medium text-sm">Nenhuma gravação encontrada para os filtros selecionados.</p>
                      </td>
                    </tr>
                  )}
