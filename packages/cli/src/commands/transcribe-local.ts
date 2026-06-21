@@ -28,7 +28,7 @@ export async function transcribeLocalCommand(args: string[]): Promise<void> {
     fs.mkdirSync(tempDir, { recursive: true });
   }
 
-  const baseName = path.basename(audioPath).split('.')[0];
+  const baseName = path.basename(audioPath).split('.')[0] || 'recording';
   const tempOutputPath = path.join(tempDir, `transcription_${baseName}.txt`);
 
   console.log(`Starting local transcription with diarization...`);

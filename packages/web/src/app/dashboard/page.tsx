@@ -9,6 +9,17 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => {
+      setNotification((prev) => (prev?.message === message ? null : prev));
+    }, 4000);
+  };
 
   async function loadData() {
     setLoading(true);
@@ -52,9 +63,9 @@ export default function DashboardPage() {
       const result = await syncRecordings();
       console.log('syncRecordings result:', result);
       if (result.success) {
-        alert('Sincronização iniciada em segundo plano!');
+        showNotification('Sincronização iniciada em segundo plano!', 'success');
       } else {
-        alert('Erro ao iniciar sincronização: ' + result.error);
+        showNotification('Erro ao iniciar sincronização: ' + result.error, 'error');
       }
     } finally {
       console.log('setSyncing(false) called');
@@ -67,8 +78,7 @@ export default function DashboardPage() {
     try {
       const result = await processAction(type, id);
       if (!result.success) {
-        alert(`Erro: ${result.message}
-Detalhes: ${result.error}`);
+        showNotification(`Erro: ${result.message}. Detalhes: ${result.error}`, 'error');
       }
       // UI updates via polling
     } finally {
@@ -87,7 +97,7 @@ Detalhes: ${result.error}`);
           setRecordings(recsResult.data || []);
         }
       } else {
-        alert(`Erro ao pausar: ${result.message}`);
+        showNotification(`Erro ao pausar: ${result.message}`, 'error');
       }
     } finally {
       setProcessingId(null);
@@ -105,7 +115,7 @@ Detalhes: ${result.error}`);
           setRecordings(recsResult.data || []);
         }
       } else {
-        alert(`Erro ao pausar tarefas: ${result.message}`);
+        showNotification(`Erro ao pausar tarefas: ${result.message}`, 'error');
       }
     } finally {
       setSyncing(false);
@@ -163,6 +173,26 @@ Detalhes: ${result.error}`);
 
   return (
     <main className="p-8 font-sans">
+      {/* Toast Notification (System Message) */}
+      {notification && (
+        <div className={`fixed top-6 right-6 z-50 p-4 rounded-2xl shadow-2xl border flex items-center gap-3 animate-in slide-in-from-top-5 fade-in duration-300 ${
+          notification.type === 'success' 
+            ? 'bg-green-50 text-green-800 border-green-200' 
+            : notification.type === 'error'
+            ? 'bg-rose-50 text-rose-800 border-rose-200'
+            : 'bg-blue-50 text-blue-800 border-blue-200'
+        }`}>
+          <span className="text-sm font-semibold">{notification.message}</span>
+          <button 
+            onClick={() => setNotification(null)}
+            className="p-1 hover:bg-black/5 rounded-lg text-slate-500 hover:text-slate-700 transition-colors cursor-pointer"
+            title="Fechar"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto space-y-8">
         <header className="flex items-center justify-between">
           <div>
@@ -250,83 +280,61 @@ Detalhes: ${result.error}`);
           </div>
         </div>
 
-        {/* Barra de Progresso e Carregamento Geral (exibida apenas quando houver atividade) */}
+        {/* Fila de Tarefas Ativas (exibida apenas quando houver atividade) */}
         {(isAnyProcessing || syncing) && (
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4 animate-in fade-in duration-300">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                  Progresso de Sincronização
-                  {isAnyProcessing && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 animate-pulse border border-blue-100">
-                      Processando...
-                    </span>
-                  )}
-                  {syncing && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600 animate-pulse border border-indigo-100">
-                      Sincronizando nuvem...
-                    </span>
-                  )}
-                </h3>
-                <p className="text-xs text-slate-500 font-medium">Percentual de conclusão local da sua biblioteca Plaud (Áudio + Transcrição + Resumos)</p>
-              </div>
-              <div className="text-left md:text-right">
-                <span className="text-3xl font-black text-blue-600">{totalProgress}%</span>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{syncedCount} de {totalFiles} concluídos</p>
-              </div>
-            </div>
-
-            <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden relative border border-slate-200/50">
-              <div 
-                className={`h-full rounded-full transition-all duration-1000 ease-out shadow-inner ${
-                  syncing || isAnyProcessing 
-                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 bg-[length:200%_auto] animate-shimmer' 
-                    : 'bg-gradient-to-r from-blue-500 to-indigo-600'
-                }`} 
-                style={{ width: `${totalProgress}%` }}
-              />
-            </div>
-
-            {/* Indicador de Tarefas Ativas em Segundo Plano */}
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Fila de Tarefas Ativas</span>
-              <div className="space-y-2">
-                {syncing && (
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                    <span className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
-                      Sincronizando metadados da nuvem Plaud Cloud...
-                    </span>
-                    <span className="text-slate-400 animate-pulse">Aguardando</span>
-                  </div>
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                Fila de Tarefas Ativas
+                {isAnyProcessing && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 animate-pulse border border-blue-100">
+                    Processando...
+                  </span>
                 )}
-                {activeRecordings.map((rec) => (
-                  <div key={rec.id} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                      <span className="flex items-center gap-2 truncate max-w-[65%]">
-                        <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
-                        {rec.filename}
+                {syncing && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600 animate-pulse border border-indigo-100">
+                    Sincronizando nuvem...
+                  </span>
+                )}
+              </h3>
+            </div>
+
+            <div className="space-y-4">
+              {syncing && (
+                <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                  <span className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
+                    Sincronizando metadados da nuvem Plaud Cloud...
+                  </span>
+                  <span className="text-slate-400 animate-pulse">Aguardando</span>
+                </div>
+              )}
+              {activeRecordings.map((rec) => (
+                <div key={rec.id} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span className="flex items-center gap-2 truncate max-w-[65%]">
+                      <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+                      {rec.filename}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-blue-600 font-black">
+                        {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
                       </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-blue-600 font-black">
-                          {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
-                        </span>
-                        <button 
-                          onClick={() => handlePause(rec.id)}
-                          disabled={processingId !== null}
-                          className="p-1 hover:bg-slate-200 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
-                          title="Pausar esta tarefa"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
-                        </button>
-                      </div>
-                    </div>
-                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                      <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${rec.progress || 0}%` }} />
+                      <button 
+                        onClick={() => handlePause(rec.id)}
+                        disabled={processingId !== null}
+                        className="p-1 hover:bg-slate-100 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
+                        title="Pausar esta tarefa"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" /></svg>
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
+                  <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden border border-slate-200/50">
+                    <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${rec.progress || 0}%` }} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}

@@ -119,6 +119,20 @@ export default function Home() {
         </header>
 
         <div className="space-y-6">
+          {/* Status Message */}
+          {status && (
+            <div className={`p-4 rounded-2xl border text-xs font-semibold animate-in fade-in duration-300 ${
+              status.type === 'success' 
+                ? 'bg-green-50 text-green-800 border-green-200' 
+                : status.type === 'error'
+                ? 'bg-rose-50 text-rose-800 border-rose-200'
+                : 'bg-blue-50 text-blue-800 border-blue-200'
+            }`}>
+              <p className="font-bold">{status.message}</p>
+              {status.details && <p className="text-[10px] text-slate-500 font-medium mt-1">{status.details}</p>}
+            </div>
+          )}
+
           {/* Botão de Ação Principal */}
           <button
             onClick={() => handleAction('install', installPlaudCli)}

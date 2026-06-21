@@ -7,9 +7,33 @@ import json
 from datetime import datetime, timezone, timedelta
 import time
 
+# Forçar console a usar UTF-8 para evitar problemas de encoding em logs no Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # Add scripts directory to path to import db_manager
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 import db_manager
+
+def is_same_title(db_title, list_title):
+    if not db_title:
+        return False
+    if not list_title:
+        return False
+        
+    clean_list = list_title
+    is_truncated = False
+    
+    for suffix in ['...', '…', '| ', '|']:
+        if clean_list.endswith(suffix):
+            clean_list = clean_list[:-len(suffix)].strip()
+            is_truncated = True
+            
+    if is_truncated:
+        # Se o título na lista está truncado, o local deve começar com o mesmo prefixo
+        return db_title.startswith(clean_list)
+    else:
+        return db_title == list_title
 
 def parse_duration(duration_str):
     """Parses duration like '16m33s' or '1h2m3s' into seconds."""
@@ -51,27 +75,66 @@ def get_target_filename(file_id, fullname, start_time_val, ext=".md"):
     return f"{date_str}_{safe_name}{ext}"
 
 def run_plaud_command(args, env):
-    plaud_js_path = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm", "node_modules", "@plaud-ai", "cli", "dist", "index.js")
-    if os.path.exists(plaud_js_path):
-        return subprocess.run(
-            ["node", plaud_js_path] + args,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            check=False,
-            shell=False,
-            env=env
-        )
-    else:
-        return subprocess.run(
-            ["plaud"] + args,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            check=False,
-            shell=True,
-            env=env
-        )
+    # Envelopa TODOS os argumentos em aspas duplas de forma robusta no Windows CMD
+    # para evitar que caracteres especiais como '&' sejam interpretados pelo terminal.
+    cmd_args = []
+    for arg in args:
+        escaped = arg.replace('"', '\\"')
+        cmd_args.append(f'"{escaped}"')
+        
+    cmd_str = "plaud " + " ".join(cmd_args)
+    
+    cmd_env = env.copy() if env else os.environ.copy()
+    cmd_env["PLAUD_TELEMETRY_DISABLED"] = "1"
+    
+    # Filter out npm environment variables to avoid execution issues inside npm/Next.js script context
+    keys_to_remove = [k for k in cmd_env.keys() if k.lower().startswith('npm_')]
+    for k in keys_to_remove:
+        del cmd_env[k]
+    
+    # Get the official plaud CLI path from environment or default to "plaud"
+    plaud_bin = cmd_env.get("OFFICIAL_PLAUD_PATH", "plaud")
+    cmd_str = f'"{plaud_bin}" ' + " ".join(cmd_args)
+    
+    # Generate a unique temp file path to avoid race conditions
+    import uuid
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    temp_dir = os.path.join(project_root, 'temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_file = os.path.join(temp_dir, f"plaud_cmd_{uuid.uuid4().hex}.txt")
+    
+    cmd_str_redirect = f"{cmd_str} > \"{temp_file}\" 2>&1"
+    
+    result = subprocess.run(
+        cmd_str_redirect,
+        stdin=subprocess.DEVNULL,
+        check=False,
+        shell=True,
+        env=cmd_env
+    )
+    
+    stdout_str = ""
+    stderr_str = ""
+    
+    if os.path.exists(temp_file):
+        try:
+            with open(temp_file, 'r', encoding='utf-8', errors='replace') as f:
+                stdout_str = f.read()
+        except Exception as e:
+            stderr_str = f"Error reading temp output file: {str(e)}"
+            
+        try:
+            os.remove(temp_file)
+        except:
+            pass
+            
+    class CommandResult:
+        def __init__(self, returncode, stdout, stderr):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+            
+    return CommandResult(result.returncode, stdout_str, stderr_str)
 
 def download_audio(file_id, target_filename, output_dir):
     """Downloads a single audio file and returns its local path and size."""
@@ -83,18 +146,19 @@ def download_audio(file_id, target_filename, output_dir):
         env["PYTHONIOENCODING"] = "utf-8"
         env["PLAUD_TELEMETRY_DISABLED"] = "1"
         
-        result = run_plaud_command(["audio", file_id], env)
-
-        if result.returncode != 0:
-            print(f"    [Error] Failed to get audio URL: {result.stderr}")
-            return None, 0
+        result = None
+        url_match = None
+        for attempt in range(3):
+            result = run_plaud_command(["audio", file_id], env)
+            output = result.stdout
+            url_match = re.search(r'(https://plaud-bucket\.s3-accelerate\.amazonaws\.com/[^\s\n]+)', output)
+            if url_match:
+                break
+            print(f"    [Warning] Fetch audio URL attempt {attempt+1} failed. Retrying in 2.0s...")
+            time.sleep(2.0)
             
-        output = result.stdout
-        
-        # Match the S3 URL exactly (handles very long AWS signed URLs with query parameters)
-        url_match = re.search(r'(https://plaud-bucket\.s3-accelerate\.amazonaws\.com/[^\s\n]+)', output)
         if not url_match:
-            print(f"    [Error] URL not found in output. Output was: {output[:200]}...")
+            print(f"    [Error] URL not found in output. Output was: {result.stdout if result else ''}")
             return None, 0
             
         url = url_match.group(1)
@@ -136,14 +200,34 @@ def download_asset(cmd_type, file_id, target_filename, output_dir):
         env["PYTHONIOENCODING"] = "utf-8"
         env["PLAUD_TELEMETRY_DISABLED"] = "1"
 
-        result = run_plaud_command([cmd_type, file_id, "-o", filepath], env)
-        if result.returncode == 0:
+        result = None
+        for attempt in range(3):
+            # Se o arquivo foi gravado de uma tentativa anterior mal sucedida/corrompida, removemos
+            if os.path.exists(filepath):
+                try: os.remove(filepath)
+                except: pass
+                
+            result = run_plaud_command([cmd_type, file_id, "-o", filepath], env)
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                break
+            print(f"    [Warning] {cmd_type} download attempt {attempt+1} failed. Retrying in 2.0s...")
+            time.sleep(2.0)
+
+        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
             return filepath
         else:
-            print(f"    [Error] {cmd_type} download failed: {result.stderr}")
+            print(f"    [Error] {cmd_type} download failed after 3 attempts. Stderr: {result.stderr if result else ''}")
+            # Limpa qualquer arquivo parcial deixado
+            if os.path.exists(filepath):
+                try: os.remove(filepath)
+                except: pass
             return None
     except Exception as e:
         print(f"    [Error] {cmd_type} exception: {e}")
+        # Limpa qualquer arquivo parcial deixado
+        if 'filepath' in locals() and os.path.exists(filepath):
+            try: os.remove(filepath)
+            except: pass
         return None
 
 def workflow_sync_and_download(download_assets=False):
@@ -186,15 +270,21 @@ def workflow_sync_and_download(download_assets=False):
         # Based on previous tests, `plaud files -s 100` seems to be the way to list files
         
         print("Executing: plaud files -s 100")
-        result = run_plaud_command(["files", "-s", "100"], env)
-        
+        result = None
+        for attempt in range(3):
+            result = run_plaud_command(["files", "-s", "100"], env)
+            if result.returncode == 0:
+                break
+            print(f"  [Warning] Attempt {attempt+1} for plaud files failed with code {result.returncode}. Retrying in 2.5s...")
+            time.sleep(2.5)
+            
         print(f"  plaud files returncode: {result.returncode}")
         if result.stderr:
             print(f"  plaud files stderr: {result.stderr}")
         
         # Check if output contains expected file listing structure before parsing
         if result.returncode != 0 and "Files on this page" not in result.stdout:
-            print(f"Workflow Error: plaud files command failed with returncode {result.returncode} and no file list in stdout.")
+            print(f"Workflow Error: plaud files command failed with returncode {result.returncode} after 3 attempts.")
             raise Exception("Plaud CLI 'files' command failed to list files.")
 
         cloud_file_data = []
@@ -237,12 +327,39 @@ def workflow_sync_and_download(download_assets=False):
             
             if record:
                 stats["existing"] += 1
-                # Heal existing records that have garbled names containing replacement characters or question marks
                 fullname_db = record.get('fullname', '')
-                if not fullname_db or '\uFFFD' in fullname_db or '?' in fullname_db:
+                cloud_name = cloud_file['name']
+                # Sincroniza o título local apenas se ele diferir do da nuvem
+                if not is_same_title(fullname_db, cloud_name):
+                    # Se o nome retornado na listagem do cloud estiver truncado,
+                    # buscamos o nome completo via 'plaud file <id>' antes de atualizar
+                    clean_cloud = cloud_name
+                    is_trunc = False
+                    for suffix in ['...', '…', '| ', '|']:
+                        if clean_cloud.endswith(suffix):
+                            is_trunc = True
+                            break
+                    
+                    real_name = cloud_name
+                    if is_trunc:
+                        print(f"  [+] Title changed on cloud and seems truncated. Fetching full title...")
+                        detail_res = None
+                        for attempt in range(3):
+                            detail_res = run_plaud_command(["file", file_id], env)
+                            if detail_res and "id:" in detail_res.stdout:
+                                break
+                            print(f"    [Warning] Fetch details attempt {attempt+1} failed. Retrying in 2.0s...")
+                            time.sleep(2.0)
+                            
+                        if detail_res and "id:" in detail_res.stdout:
+                            m = re.search(r'name:\s+(.*)', detail_res.stdout)
+                            if m:
+                                real_name = m.group(1).strip()
+                    
+                    print(f"[*] Updating title for {file_id}: '{fullname_db}' -> '{real_name}'")
                     db_manager.update_record(conn, {
                         "id": file_id,
-                        "fullname": cloud_file['name']
+                        "fullname": real_name
                     })
                 continue 
             
@@ -250,7 +367,19 @@ def workflow_sync_and_download(download_assets=False):
             stats["new"] += 1
             
             # Fetch full details for the file
-            detail_res = run_plaud_command(["file", file_id], env)
+            detail_res = None
+            for attempt in range(3):
+                detail_res = run_plaud_command(["file", file_id], env)
+                if detail_res and "id:" in detail_res.stdout:
+                    break
+                print(f"    [Warning] Fetch details attempt {attempt+1} failed for new file {file_id}. Retrying in 2.0s...")
+                time.sleep(2.0)
+                
+            if not detail_res or "id:" not in detail_res.stdout:
+                print(f"  [Error] Could not fetch details for {file_id} after 3 attempts. Returncode: {detail_res.returncode if detail_res else 'None'}, Stderr: {detail_res.stderr if detail_res else ''}")
+                stats["errors"] += 1
+                continue
+                
             output = detail_res.stdout
             
             # Helper to extract values from the detailed file output
@@ -259,11 +388,7 @@ def workflow_sync_and_download(download_assets=False):
                 return m.group(1).strip() if m else None
             
             start_at_str = get_val(r'start_at:\s+(.*)')
-            if not start_at_str:
-                print(f"  [Error] Could not fetch details for {file_id}. Returncode: {detail_res.returncode}, Stderr: {detail_res.stderr}")
-                stats["errors"] += 1
-                continue
-                
+            
             try:
                 dt = datetime.fromisoformat(start_at_str.split('.')[0])
                 timestamp = int(dt.timestamp())
@@ -276,7 +401,7 @@ def workflow_sync_and_download(download_assets=False):
             # Register Initial Entry
             payload = {
                 "id": file_id,
-                "fullname": cloud_file['name'], # Use name from `plaud files` or `plaud file` output
+                "fullname": get_val(r'name:\s+(.*)') or cloud_file['name'], # Use full name from detail
                 "duration": parse_duration(cloud_file['duration_str']), # Use duration from `plaud files` output
                 "start_time": timestamp,
                 "is_trash": 0,
@@ -293,7 +418,18 @@ def workflow_sync_and_download(download_assets=False):
         # --- (4) & (5) Check pending transcripts and summaries on Plaud Cloud and download if available ---
         print("\nChecking for missing transcripts/summaries in the local database...")
         cursor = conn.cursor()
-        cursor.execute("SELECT id, fullname, start_time, transcribed, analyzed FROM recordings WHERE transcribed = 0 OR analyzed = 0")
+        cursor.execute("""
+            SELECT id, fullname, start_time, transcribed, analyzed 
+            FROM recordings 
+            WHERE transcribed = 0 
+               OR analyzed = 0 
+               OR fullname IS NULL 
+               OR fullname = '' 
+               OR fullname LIKE '%|' 
+               OR fullname LIKE '%| ' 
+               OR fullname LIKE '%…' 
+               OR fullname LIKE '%...'
+        """)
         pending_records = cursor.fetchall()
         
         print(f"Found {len(pending_records)} recording(s) with pending transcripts or summaries.")
@@ -301,14 +437,28 @@ def workflow_sync_and_download(download_assets=False):
         for record_item in pending_records:
             file_id, fullname, start_time, transcribed, analyzed = record_item
             
-            print(f"[*] Checking assets on cloud for: {fullname} ({file_id})")
+            is_title_truncated = (
+                fullname.endswith('|') or 
+                fullname.endswith('| ') or 
+                fullname.endswith('…') or 
+                fullname.endswith('...')
+            )
+            
+            print(f"[*] Checking assets and title on cloud for: {fullname} ({file_id})")
             
             # Pequeno delay para evitar sobrecarga de processos Node/libuv no Windows
             time.sleep(0.8)
             
-            detail_res = run_plaud_command(["file", file_id], env)
-            if detail_res.returncode != 0:
-                print(f"  [Error] Failed to fetch details for {file_id}. Stderr: {detail_res.stderr}")
+            detail_res = None
+            for attempt in range(3):
+                detail_res = run_plaud_command(["file", file_id], env)
+                if detail_res and "id:" in detail_res.stdout:
+                    break
+                print(f"    [Warning] Fetch details attempt {attempt+1} failed for pending file {file_id}. Retrying in 2.0s...")
+                time.sleep(2.0)
+                
+            if not detail_res or "id:" not in detail_res.stdout:
+                print(f"  [Error] Failed to fetch details for {file_id} after 3 attempts. Stderr: {detail_res.stderr if detail_res else ''}")
                 continue
                 
             output = detail_res.stdout
@@ -318,15 +468,23 @@ def workflow_sync_and_download(download_assets=False):
                 m = re.search(pattern, output)
                 return m.group(1).strip() if m else None
                 
+            cloud_name = get_val_local(r'name:\s+(.*)')
             cloud_has_trans = 1 if get_val_local(r'transcript:\s+(.*)') == "available" else 0
             cloud_has_sum = 1 if get_val_local(r'summary:\s+(.*)') == "available" else 0
             
             updates = {}
             
+            # If the title on cloud is complete and different from local, update it
+            current_name = fullname
+            if cloud_name and (is_title_truncated or fullname != cloud_name):
+                print(f"  [+] Title updated to complete: '{fullname}' -> '{cloud_name}'")
+                updates["fullname"] = cloud_name
+                current_name = cloud_name
+            
             # Check Transcript: If false locally, check if available on cloud to download
             if transcribed == 0:
                 if cloud_has_trans == 1:
-                    target_filename = get_target_filename(file_id, fullname, start_time, ext=".md")
+                    target_filename = get_target_filename(file_id, current_name, start_time, ext=".md")
                     print(f"  [+] Transcript is available on cloud. Downloading...")
                     filepath = download_asset("transcript", file_id, target_filename, obsidian_trans_dir)
                     if filepath:
@@ -340,7 +498,7 @@ def workflow_sync_and_download(download_assets=False):
             # Check Summary: If false locally, check if available on cloud to download
             if analyzed == 0:
                 if cloud_has_sum == 1:
-                    target_filename = get_target_filename(file_id, fullname, start_time, ext=".md")
+                    target_filename = get_target_filename(file_id, current_name, start_time, ext=".md")
                     print(f"  [+] Summary is available on cloud. Downloading...")
                     filepath = download_asset("summary", file_id, target_filename, obsidian_sum_dir)
                     if filepath:

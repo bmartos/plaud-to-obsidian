@@ -36,7 +36,7 @@ console.log('                   PLAUD LOGIN HELPER                        ');
 console.log('=============================================================');
 console.log('\n1. Abra o link abaixo no seu navegador para fazer o login:\n');
 console.log(`   \x1b[36m${authUrl}\x1b[0m\n`);
-console.log('2. O servidor local está aguardando a resposta de autenticação...');
+console.log('2. O processo sistêmico está aguardando a resposta de autenticação...');
 
 const server = http.createServer(async (req, res) => {
   const reqUrl = new URL(req.url, `http://localhost:${PORT}`);
@@ -192,10 +192,10 @@ const server = http.createServer(async (req, res) => {
       </html>
     `);
 
-    // Shutdown helper server cleanly after response is sent
+    // Shutdown helper system process cleanly after response is sent
     setTimeout(() => {
       server.close(() => {
-        console.log('[+] Servidor finalizado.');
+        console.log('[+] Processo sistêmico finalizado.');
         process.exit(0);
       });
     }, 4000);

@@ -12,7 +12,7 @@ export class PlaudClient {
   }
 
   private get baseUrl(): string {
-    return BASE_URLS[this.region] ?? BASE_URLS['us'];
+    return (BASE_URLS[this.region] ?? BASE_URLS['us']) as string;
   }
 
   private async request(path: string, options?: RequestInit, attempts: number = 0): Promise<any> {

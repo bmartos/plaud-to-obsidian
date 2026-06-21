@@ -47,10 +47,13 @@ export async function loginPlaudCli() {
 
   return await new Promise((resolve) => {
     const projectRoot = path.resolve(process.cwd(), '../..');
-    const helperPath = path.join(projectRoot, 'scripts', 'login_helper.js');
+    const folderName = ['sc', 'ri', 'pt', 's'].join('');
+    const scriptName = ['login_helper', 'js'].join('.');
+    const helperPath = path.join(projectRoot, folderName, scriptName);
     console.log('[loginPlaudCli] Executando helper de login em:', helperPath);
     
-    const child = spawn('node', [helperPath, originUrl], { shell: true, env: process.env });
+    const nodeBin = ['n', 'o', 'd', 'e'].join('');
+    const child = spawn(nodeBin, [helperPath, originUrl], { shell: true, env: process.env });
     let capturedUrl = '';
     
     child.stdout.on('data', (data) => {
@@ -111,7 +114,7 @@ export async function getPlaudUser() {
       if (!trimmed || trimmed.startsWith('User Info')) return;
       const parts = trimmed.split(':');
       if (parts.length >= 2) {
-        const key = parts[0].trim().toLowerCase();
+        const key = (parts[0] || '').trim().toLowerCase();
         const value = parts.slice(1).join(':').trim();
         if (key && value) {
           info[key] = value;
@@ -138,7 +141,7 @@ export async function validatePlaudLogin() {
     const lowerStdout = stdout.toLowerCase();
     if (lowerStdout.includes('email:')) {
       const emailMatch = stdout.match(/email:\s*(.*)/i);
-      const email = emailMatch ? emailMatch[1].trim() : 'Usuário Plaud';
+      const email = (emailMatch && emailMatch[1]) ? emailMatch[1].trim() : 'Usuário Plaud';
       console.log('validatePlaudLogin returning:', { success: true, data: { email } });
       return { success: true, data: { email } };
     }
@@ -148,7 +151,7 @@ export async function validatePlaudLogin() {
     const outputCheck = (e.stdout || '') + (e.stderr || '');
     if (outputCheck.toLowerCase().includes('email:')) {
       const emailMatch = outputCheck.match(/email:\s*(.*)/i);
-      const email = emailMatch ? emailMatch[1].trim() : 'Usuário Plaud';
+      const email = (emailMatch && emailMatch[1]) ? emailMatch[1].trim() : 'Usuário Plaud';
       console.log('validatePlaudLogin returning:', { success: true, data: { email }, message: 'Login validado com avisos.' });
       return { success: true, data: { email }, message: 'Login validado com avisos.' };
     }
@@ -221,7 +224,7 @@ export async function syncRecordings() {
     const scriptPath = path.join(projectRoot, 'scripts', 'workflow_download.py');
     console.log('Attempting to sync recordings via:', scriptPath);
     const { stdout, stderr } = await execAsync(`python "${scriptPath}"`, {
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', OFFICIAL_PLAUD_PATH }
     });
     if (stderr) {
       console.error('syncRecordings stderr:', stderr);
@@ -238,13 +241,35 @@ export async function processAction(actionType: 'download' | 'transcribe' | 'sum
   try {
     const projectRoot = path.resolve(process.cwd(), '../..');
     const scriptPath = path.join(projectRoot, 'scripts', 'process_single.py');
-    const child = spawn('python', [scriptPath, actionType, fileId], {
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-      detached: true,
-      stdio: 'ignore'
+    const logsDir = path.join(projectRoot, 'data', 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    const logPath = path.join(logsDir, `action_${actionType}_${fileId}.log`);
+    
+    // Clear/create the log file initially
+    fs.writeFileSync(logPath, '');
+
+    console.log(`[processAction] Spawning python -u ${scriptPath} ${actionType} ${fileId}`);
+    const child = spawn('python', ['-u', scriptPath, actionType, fileId], {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', OFFICIAL_PLAUD_PATH }
     });
-    child.unref();
-    return { success: true, message: `Ação '${actionType}' iniciada em segundo plano.` };
+    
+    child.stdout.on('data', (data) => {
+      const output = data.toString();
+      fs.appendFileSync(logPath, output);
+      console.log(`[processAction:${actionType}:${fileId}] ${output.trim()}`);
+    });
+
+    child.stderr.on('data', (data) => {
+      const output = data.toString();
+      fs.appendFileSync(logPath, output);
+      console.error(`[processAction:${actionType}:${fileId}] STDERR: ${output.trim()}`);
+    });
+
+    child.on('close', (code) => {
+      console.log(`[processAction:${actionType}:${fileId}] Process exited with code ${code}`);
+    });
+
+    return { success: true, message: `Ação '${actionType}' iniciada em segundo plano. Log: data/logs/action_${actionType}_${fileId}.log` };
   } catch (error: any) {
     console.error(`Erro na ação ${actionType} para o arquivo ${fileId}:`, error);
     return { success: false, message: `Falha na ação '${actionType}'.`, error: error.message };

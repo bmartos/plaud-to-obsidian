@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import sqlite3
+import re
 
 # Add scripts directory to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,10 +68,10 @@ def main():
         db_manager.update_record(conn, {"id": file_id, "status": "transcribing", "progress": 0})
         print(f"Starting local transcription for {file_id}...")
         
-        p = subprocess.Popen(["python", script_path, record['audio_path'], "medium", trans_path], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+        p = subprocess.Popen(["python", "-u", script_path, record['audio_path'], "medium", trans_path], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
         
         for line in p.stdout:
-            print(line, end="")
+            print(line, end="", flush=True)
             if "Progresso:" in line:
                 try:
                     pct = int(re.search(r'Progresso:\s*(\d+)%', line).group(1))
