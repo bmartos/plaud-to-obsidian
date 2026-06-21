@@ -26,7 +26,11 @@ export default function DashboardPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // States for filtering
-  const [filterDateText, setFilterDateText] = useState<string>('');
+  const [dateFilterType, setDateFilterType] = useState<string>('todos'); // 'todos' | 'hoje' | 'ontem' | '7dias' | '30dias' | 'unica' | 'periodo'
+  const [customSingleDate, setCustomSingleDate] = useState<string>(''); // YYYY-MM-DD
+  const [customStartDate, setCustomStartDate] = useState<string>(''); // YYYY-MM-DD
+  const [customEndDate, setCustomEndDate] = useState<string>(''); // YYYY-MM-DD
+  
   const [filterDownload, setFilterDownload] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterTranscribe, setFilterTranscribe] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterAnalyze, setFilterAnalyze] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
@@ -210,51 +214,42 @@ export default function DashboardPage() {
 
   // Apply filters
   const filteredRecordings = recordings.filter(rec => {
-    // 1. Date range or single date or search matching in filterDateText
-    if (filterDateText.trim()) {
-      const parsedDates = (() => {
-        const clean = filterDateText.trim();
-        const formatToISO = (str: string): string => {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-          const match = str.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
-          if (match) {
-            const day = match[1].padStart(2, '0');
-            const month = match[2].padStart(2, '0');
-            const year = match[3];
-            return `${year}-${month}-${day}`;
-          }
-          return '';
-        };
+    // 1. Date filter (Dropdown mapped logic)
+    if (dateFilterType !== 'todos') {
+      if (!rec.start_time) return false;
+      const recDateStr = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
+      
+      // Get current dates using local timezone comparison values
+      const getLocalDateStr = (offsetDays = 0): string => {
+        const d = new Date();
+        if (offsetDays !== 0) {
+          d.setDate(d.getDate() + offsetDays);
+        }
+        return d.toLocaleDateString('en-CA'); // Returns "YYYY-MM-DD" in local timezone
+      };
 
-        const rangeParts = clean.split(/\s+(?:-|a|até|to)\s+/i);
-        if (rangeParts.length === 2) {
-          const start = formatToISO(rangeParts[0].trim());
-          const end = formatToISO(rangeParts[1].trim());
-          if (start && end) return { start, end };
-        } else {
-          const single = formatToISO(clean);
-          if (single) return { start: single, end: single };
-        }
-        return null;
-      })();
-
-      if (parsedDates) {
-        if (rec.start_time) {
-          const recDate = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
-          if (recDate < parsedDates.start || recDate > parsedDates.end) {
-            return false;
-          }
-        } else {
-          return false;
-        }
-      } else {
-        // Fallback: Match as substring in start_time or date_formatted
-        const term = filterDateText.trim().toLowerCase();
-        const startMatch = (rec.start_time || '').toLowerCase().includes(term);
-        const formattedMatch = (rec.date_formatted || '').toLowerCase().includes(term);
-        if (!startMatch && !formattedMatch) {
-          return false;
-        }
+      if (dateFilterType === 'hoje') {
+        const todayStr = getLocalDateStr();
+        if (recDateStr !== todayStr) return false;
+      } 
+      else if (dateFilterType === 'ontem') {
+        const yesterdayStr = getLocalDateStr(-1);
+        if (recDateStr !== yesterdayStr) return false;
+      } 
+      else if (dateFilterType === '7dias') {
+        const limitStr = getLocalDateStr(-7);
+        if (recDateStr < limitStr) return false;
+      } 
+      else if (dateFilterType === '30dias') {
+        const limitStr = getLocalDateStr(-30);
+        if (recDateStr < limitStr) return false;
+      } 
+      else if (dateFilterType === 'unica') {
+        if (customSingleDate && recDateStr !== customSingleDate) return false;
+      } 
+      else if (dateFilterType === 'periodo') {
+        if (customStartDate && recDateStr < customStartDate) return false;
+        if (customEndDate && recDateStr > customEndDate) return false;
       }
     }
 
@@ -560,23 +555,59 @@ export default function DashboardPage() {
 
            {/* Filter Bar */}
            <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-6">
-             <div className="flex flex-col gap-1.5 min-w-[280px] flex-1">
-               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data ou Período</label>
-               <div className="relative">
-                 <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
-                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                   </svg>
-                 </span>
+             <div className="flex flex-col gap-1.5 min-w-[180px]">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Período de Gravação</label>
+               <select
+                 value={dateFilterType}
+                 onChange={(e) => setDateFilterType(e.target.value)}
+                 className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
+               >
+                 <option value="todos">Todos os Períodos</option>
+                 <option value="hoje">Hoje</option>
+                 <option value="ontem">Ontem</option>
+                 <option value="7dias">Últimos 7 dias</option>
+                 <option value="30dias">Últimos 30 dias</option>
+                 <option value="unica">Selecionar Data Única...</option>
+                 <option value="periodo">Selecionar Intervalo de Datas...</option>
+               </select>
+             </div>
+
+             {/* Graphical picker for custom single date */}
+             {dateFilterType === 'unica' && (
+               <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
+                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data do Arquivo</label>
                  <input 
-                   type="text" 
-                   value={filterDateText}
-                   onChange={(e) => setFilterDateText(e.target.value)}
-                   placeholder="ex: 18/06/2026 ou 18/06/2026 a 21/06/2026"
-                   className="pl-10 pr-3.5 py-2 w-full bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm"
+                   type="date" 
+                   value={customSingleDate}
+                   onChange={(e) => setCustomSingleDate(e.target.value)}
+                   className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
                  />
                </div>
-             </div>
+             )}
+
+             {/* Graphical picker for custom date range */}
+             {dateFilterType === 'periodo' && (
+               <>
+                 <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
+                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Inicial</label>
+                   <input 
+                     type="date" 
+                     value={customStartDate}
+                     onChange={(e) => setCustomStartDate(e.target.value)}
+                     className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
+                   />
+                 </div>
+                 <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
+                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Final</label>
+                   <input 
+                     type="date" 
+                     value={customEndDate}
+                     onChange={(e) => setCustomEndDate(e.target.value)}
+                     className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
+                   />
+                 </div>
+               </>
+             )}
 
              <div className="flex flex-col gap-1.5 min-w-[120px]">
                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Download</label>
@@ -617,10 +648,13 @@ export default function DashboardPage() {
                </select>
              </div>
 
-             {(filterDateText || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
+             {(dateFilterType !== 'todos' || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
                <button 
                  onClick={() => {
-                   setFilterDateText('');
+                   setDateFilterType('todos');
+                   setCustomSingleDate('');
+                   setCustomStartDate('');
+                   setCustomEndDate('');
                    setFilterDownload('todos');
                    setFilterTranscribe('todos');
                    setFilterAnalyze('todos');
