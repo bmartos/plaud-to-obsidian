@@ -1,21 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { validatePlaudLogin, getSettings, updateObsidianPath, getPlaudUser } from '../actions';
+import { validatePlaudLogin, getSettings, updateObsidianPath, getPlaudUser, getPrompts, updatePrompts } from '../actions';
 
 export default function ProfilePage() {
   const [userData, setUserData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [newPath, setNewPath] = useState('');
   const [saving, setSaving] = useState(false);
+  const [whisperPrompt, setWhisperPrompt] = useState('');
+  const [geminiPrompt, setGeminiPrompt] = useState('');
+  const [savingPrompts, setSavingPrompts] = useState(false);
 
   async function loadData() {
     try {
-      const [userResult, settingsData] = await Promise.all([
+      const [userResult, settingsData, promptsData] = await Promise.all([
         getPlaudUser(),
-        getSettings()
+        getSettings(),
+        getPrompts()
       ]);
 
       if (userResult.success) {
@@ -25,6 +30,10 @@ export default function ProfilePage() {
       }
       setSettings(settingsData);
       setNewPath(settingsData.obsidianPath || '');
+      if (promptsData && promptsData.success) {
+        setWhisperPrompt(promptsData.whisperPrompt || '');
+        setGeminiPrompt(promptsData.geminiPrompt || '');
+      }
     } catch (e: any) {
       setError('Falha ao carregar dados do perfil.');
     } finally {
@@ -39,16 +48,39 @@ export default function ProfilePage() {
   const handleSavePath = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setError(null);
+    setSuccess(null);
     try {
       const result = await updateObsidianPath(newPath);
       if (result.success) {
-        alert('Caminho atualizado com sucesso!');
+        setSuccess('Caminho do Obsidian atualizado com sucesso!');
         await loadData();
       } else {
-        alert('Erro ao salvar: ' + result.error);
+        setError('Erro ao salvar caminho: ' + result.error);
       }
+    } catch (e: any) {
+      setError('Erro ao salvar caminho: ' + e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSavePrompts = async () => {
+    setSavingPrompts(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await updatePrompts(whisperPrompt, geminiPrompt);
+      if (result.success) {
+        setSuccess('Configurações de prompts salvas com sucesso!');
+        await loadData();
+      } else {
+        setError('Erro ao salvar prompts: ' + result.error);
+      }
+    } catch (e: any) {
+      setError('Erro ao salvar prompts: ' + e.message);
+    } finally {
+      setSavingPrompts(false);
     }
   };
 
@@ -169,6 +201,92 @@ export default function ProfilePage() {
             </div>
           </section>
         </div>
+
+        {/* Sessão de Prompts da IA */}
+        <section className="bg-white rounded-[2rem] shadow-sm border border-slate-200 p-8 space-y-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              Configuração de Prompts da IA
+            </h2>
+            <p className="text-xs text-slate-400 font-medium mt-1">Personalize os prompts enviados ao Whisper (transcrição) e Gemini (resumo)</p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Whisper Prompt Card */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  🎙️ Prompt do Whisper (Contexto)
+                </label>
+                <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wider">Transcrição</span>
+              </div>
+              <textarea
+                value={whisperPrompt}
+                onChange={(e) => setWhisperPrompt(e.target.value)}
+                placeholder="Ex: Transcrição de reunião sobre desenvolvimento de software..."
+                rows={10}
+                className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-y leading-relaxed"
+              />
+              <p className="text-[10px] text-slate-400 leading-normal">
+                Use este prompt para ensinar palavras difíceis, nomes próprios, termos técnicos, jargões da sua empresa ou regras gramaticais ao Whisper.
+              </p>
+            </div>
+
+            {/* Gemini Prompt Card */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  ✨ Prompt do Gemini (Instruções de Resumo)
+                </label>
+                <span className="text-[9px] font-bold text-slate-300 uppercase tracking-wider">IA Summarizer</span>
+              </div>
+              <textarea
+                value={geminiPrompt}
+                onChange={(e) => setGeminiPrompt(e.target.value)}
+                placeholder="Ex: Crie um resumo executivo com tópicos e itens de ação..."
+                rows={10}
+                className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-y leading-relaxed"
+              />
+              <p className="text-[10px] text-slate-400 leading-normal">
+                Instrua o Gemini a estruturar o resumo exatamente do seu jeito. Você pode incluir <code className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 font-mono text-[9px] font-bold">{"{transcript_text}"}</code> para posicionar a transcrição ou deixar que ela seja anexada no final por padrão.
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-100 flex justify-end">
+            <button
+              onClick={handleSavePrompts}
+              disabled={savingPrompts}
+              className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50 shadow-lg shadow-blue-100 flex items-center gap-2 cursor-pointer border-0"
+            >
+              {savingPrompts ? (
+                <>
+                  <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></div>
+                  <span>Salvando Prompts...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>Salvar Configurações de Prompts</span>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
+        {success && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2">
+             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+             <div className="flex-1">
+               <p className="font-bold text-sm">{success}</p>
+             </div>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2">

@@ -384,6 +384,73 @@ export async function updateObsidianPath(newPath: string) {
   }
 }
 
+export async function deleteRecording(id: string) {
+  const projectRoot = path.resolve(process.cwd(), '../..');
+  const dbPath = path.join(projectRoot, 'data', 'plaud_records.db');
+  const dbManagerPath = path.join(projectRoot, 'scripts', 'db_manager.py');
+  const deletedFiles: string[] = [];
+  const notFoundFiles: string[] = [];
+
+  try {
+    // 1. Buscar o registro no banco para obter os caminhos dos arquivos
+    const record = await new Promise<any>((resolve, reject) => {
+      const child = spawn('python', [dbManagerPath, 'get', id], {
+        env: { ...process.env, DATABASE_URL: dbPath, PYTHONIOENCODING: 'utf-8' }
+      });
+      let out = '';
+      child.stdout.on('data', (data) => out += data.toString());
+      child.on('close', (code) => {
+        if (code === 0 && out.trim()) {
+          try { resolve(JSON.parse(out)); }
+          catch (e) { reject(new Error('Falha ao decodificar JSON do banco.')); }
+        } else reject(new Error('Gravação não encontrada no banco.'));
+      });
+    });
+
+    // 2. Deletar arquivos físicos (áudio, transcrição, resumo)
+    const filePaths = [record.audio_path, record.transcription_path, record.summary_path].filter(Boolean);
+    for (const filePath of filePaths) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          deletedFiles.push(filePath);
+          console.log(`[deleteRecording] Arquivo deletado: ${filePath}`);
+        } else {
+          notFoundFiles.push(filePath);
+          console.log(`[deleteRecording] Arquivo não encontrado (ignorado): ${filePath}`);
+        }
+      } catch (e: any) {
+        console.error(`[deleteRecording] Erro ao deletar ${filePath}:`, e.message);
+        return { success: false, message: `Erro ao deletar arquivo: ${filePath}`, error: e.message };
+      }
+    }
+
+    // 3. Deletar a linha no banco de dados
+    await new Promise<void>((resolve, reject) => {
+      const pythonCode = `import sqlite3; conn=sqlite3.connect(r'${dbPath}'); conn.cursor().execute("DELETE FROM recordings WHERE id=?", ('${id}',)); conn.commit(); conn.close()`;
+      const child = spawn('python', ['-c', pythonCode], {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      });
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`db retornou código: ${code}`));
+      });
+      child.on('error', (err) => reject(err));
+    });
+
+    console.log(`[deleteRecording] Registro ${id} deletado do banco.`);
+    return {
+      success: true,
+      message: 'Gravação deletada com sucesso.',
+      deletedFiles,
+      notFoundFiles
+    };
+  } catch (error: any) {
+    console.error(`[deleteRecording] Erro ao deletar ${id}:`, error);
+    return { success: false, message: 'Erro ao deletar gravação.', error: error.message };
+  }
+}
+
 export async function getFileContent(id: string, type: 'transcription' | 'summary') {
   try {
     const projectRoot = path.resolve(process.cwd(), '../..');
@@ -419,3 +486,61 @@ export async function getFileContent(id: string, type: 'transcription' | 'summar
     return { success: false, error: error.message };
   }
 }
+
+export async function getPrompts() {
+  try {
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const promptsPath = path.join(projectRoot, 'data', 'prompts.json');
+    
+    const defaultWhisper = "Transcrição de reunião técnica e conversa casual em português do Brasil (pt-BR). Inclui termos sobre investimentos, ações do Google, saúde, diabetes (Glifage, Ozempic, insulina), esportes como triatlo e mergulho, e localizações como Santos, Ilhabela e Sorocaba. Mantenha a pontuação natural e evite repetições de gagueira.";
+    
+    const defaultGemini = `Você é um modelo de NLP especializado em analisar transcrições de áudio, gerar resumos executivos estruturados e extrair palavras-chave relevantes como tags para o Obsidian.
+
+Com base na transcrição abaixo, gere o resumo do documento seguindo exatamente a estrutura abaixo:
+
+1. **Tags de Indexação**: Na primeira linha do documento, escreva "Tags: " seguido de 3 a 6 tags relevantes para o conteúdo. As tags devem seguir a convenção do Obsidian: todas em letras minúsculas, sem acentos, sem caracteres especiais, utilizando hífen (-) como separador de palavras, e cada uma iniciada com o caractere '#'. Exemplo: Tags: #planejamento #sprint-review #banco-de-dados
+2. **Título**: Um título em Markdown (usando '#' no início) representando o assunto principal.
+3. **Resumo Executivo**: Uma seção iniciada por "## 🎯 Resumo Executivo" descrevendo brevemente os tópicos centrais.
+4. **Principais Tópicos**: Uma seção iniciada por "## 🗺️ Tópicos Discutidos" contendo pontos detalhados em tópicos (bullet points).
+5. **Ações/Decisões**: Uma seção iniciada por "## ✅ Action Items" com tarefas, decisões ou próximos passos identificados e seus responsáveis.`;
+
+    if (fs.existsSync(promptsPath)) {
+      const content = fs.readFileSync(promptsPath, 'utf-8');
+      const data = JSON.parse(content);
+      return {
+        success: true,
+        whisperPrompt: data.whisperPrompt || defaultWhisper,
+        geminiPrompt: data.geminiPrompt || defaultGemini
+      };
+    }
+
+    // Se não existir, cria o arquivo com os padrões
+    const initialData = { whisperPrompt: defaultWhisper, geminiPrompt: defaultGemini };
+    fs.mkdirSync(path.dirname(promptsPath), { recursive: true });
+    fs.writeFileSync(promptsPath, JSON.stringify(initialData, null, 2), 'utf-8');
+    
+    return {
+      success: true,
+      whisperPrompt: defaultWhisper,
+      geminiPrompt: defaultGemini
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function updatePrompts(whisperPrompt: string, geminiPrompt: string) {
+  try {
+    const projectRoot = path.resolve(process.cwd(), '../..');
+    const promptsPath = path.join(projectRoot, 'data', 'prompts.json');
+    
+    const data = { whisperPrompt, geminiPrompt };
+    fs.mkdirSync(path.dirname(promptsPath), { recursive: true });
+    fs.writeFileSync(promptsPath, JSON.stringify(data, null, 2), 'utf-8');
+    
+    return { success: true, message: 'Prompts atualizados com sucesso!' };
+  } catch (error: any) {
+    return { success: false, message: 'Erro ao atualizar prompts.', error: error.message };
+  }
+}
+

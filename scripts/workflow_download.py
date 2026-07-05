@@ -77,9 +77,70 @@ def parse_duration(duration_str):
 
 # --- Helper functions (from original script, corrected where needed) ---
 def sanitize_filename(name):
-    clean = re.sub(r'[\/*?:"<>|]', "-", name)
+    clean = re.sub(r'[\/*?":<>|]', "-", name)
     clean = clean.replace(" ", "_")
     return clean
+
+def rename_record_files(conn, record, new_fullname, audio_dir, obsidian_trans_dir, obsidian_sum_dir):
+    """
+    Renomeia os arquivos físicos (áudio, transcrição, resumo) quando o fullname muda.
+    Atualiza os caminhos no banco de dados.
+    Retorna um dict com os campos atualizados (para merge no caller).
+    """
+    file_id = record['id']
+    start_time = record.get('start_time', '')
+    path_updates = {}
+
+    # --- Áudio ---
+    old_audio = record.get('audio_path')
+    if old_audio and os.path.exists(old_audio):
+        ext = os.path.splitext(old_audio)[1]  # .mp3, .m4a, etc.
+        new_audio_name = get_target_filename(file_id, new_fullname, start_time, ext=ext)
+        new_audio_path = os.path.join(audio_dir, new_audio_name)
+        if old_audio != new_audio_path:
+            try:
+                os.rename(old_audio, new_audio_path)
+                path_updates['audio_path'] = new_audio_path
+                print(f"  [rename] Audio: {os.path.basename(old_audio)} -> {new_audio_name}")
+            except Exception as e:
+                print(f"  [Warning] Could not rename audio file: {e}")
+
+    # --- Transcrição ---
+    old_trans = record.get('transcription_path')
+    if old_trans and os.path.exists(old_trans):
+        new_trans_name = get_target_filename(file_id, new_fullname, start_time, ext=".md")
+        new_trans_path = os.path.join(obsidian_trans_dir, new_trans_name)
+        if old_trans != new_trans_path:
+            try:
+                os.rename(old_trans, new_trans_path)
+                path_updates['transcription_path'] = new_trans_path
+                print(f"  [rename] Transcription: {os.path.basename(old_trans)} -> {new_trans_name}")
+            except Exception as e:
+                print(f"  [Warning] Could not rename transcription file: {e}")
+
+    # --- Resumo ---
+    old_sum = record.get('summary_path')
+    if old_sum and os.path.exists(old_sum):
+        new_sum_name = get_target_filename(file_id, new_fullname, start_time, ext=".md")
+        new_sum_path = os.path.join(obsidian_sum_dir, new_sum_name)
+        if old_sum != new_sum_path:
+            try:
+                os.rename(old_sum, new_sum_path)
+                path_updates['summary_path'] = new_sum_path
+                print(f"  [rename] Summary: {os.path.basename(old_sum)} -> {new_sum_name}")
+            except Exception as e:
+                print(f"  [Warning] Could not rename summary file: {e}")
+
+    # Persistir os novos paths no banco, junto com o novo fullname
+    if path_updates:
+        update_payload = {'id': file_id, 'fullname': new_fullname, **path_updates}
+        db_manager.update_record(conn, update_payload)
+        print(f"  [DB] Paths updated for {file_id}")
+    else:
+        # Sem arquivos para renomear, só atualiza o nome
+        db_manager.update_record(conn, {'id': file_id, 'fullname': new_fullname})
+
+    return path_updates
 
 def get_target_filename(file_id, fullname, start_time_val, ext=".md"):
     if start_time_val:
@@ -381,10 +442,7 @@ def workflow_sync_and_download(download_assets=False):
                                 real_name = m.group(1).strip()
                     
                     print(f"[*] Updating title for {file_id}: '{fullname_db}' -> '{real_name}'")
-                    db_manager.update_record(conn, {
-                        "id": file_id,
-                        "fullname": real_name
-                    })
+                    rename_record_files(conn, record, real_name, audio_dir, obsidian_trans_dir, obsidian_sum_dir)
                 continue 
             
             print(f"[*] Processing NEW file from cloud: {file_id} - {cloud_file['name']}")
@@ -502,8 +560,16 @@ def workflow_sync_and_download(download_assets=False):
             current_name = fullname
             if cloud_name and (is_title_truncated or fullname != cloud_name):
                 print(f"  [+] Title updated to complete: '{fullname}' -> '{cloud_name}'")
-                updates["fullname"] = cloud_name
+                # Buscar o registro completo (com audio_path, transcription_path, summary_path)
+                full_record = db_manager.get_record(conn, file_id) or {
+                    'id': file_id, 'start_time': start_time,
+                    'audio_path': None, 'transcription_path': None, 'summary_path': None
+                }
+                # Renomear arquivos físicos e atualizar paths no banco
+                rename_record_files(conn, full_record, cloud_name, audio_dir, obsidian_trans_dir, obsidian_sum_dir)
                 current_name = cloud_name
+                # NÃO adicionar 'fullname' em updates — já foi salvo pelo rename_record_files
+
             
             # Check Transcript: If false locally, check if available on cloud to download
             if transcribed == 0:

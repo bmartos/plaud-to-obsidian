@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 import sys
 import os
 import json
@@ -25,8 +25,8 @@ def init_db(db_path):
             summary_path TEXT,
             status TEXT DEFAULT 'idle',
             progress INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT,
+            updated_at TEXT
         )
     ''')
     conn.commit()
@@ -101,16 +101,17 @@ def update_record(conn, record):
     fields = [k for k in record.keys() if k != 'id' and k in ALLOWED_FIELDS]
     values = [record[k] for k in fields]
     
+    now = get_now_utc3()
     if exists:
         if not fields:
             return
         set_clause = ', '.join([f'{f} = ?' for f in fields])
-        cursor.execute(f'UPDATE recordings SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (*values, id))
+        cursor.execute(f'UPDATE recordings SET {set_clause}, updated_at = ? WHERE id = ?', (*values, now, id))
     else:
-        all_fields = ['id'] + fields
+        all_fields = ['id'] + fields + ['created_at', 'updated_at']
         placeholders = ', '.join(['?' for _ in all_fields])
         columns_clause = ', '.join(all_fields)
-        cursor.execute(f'INSERT INTO recordings ({columns_clause}) VALUES ({placeholders})', (id, *values))
+        cursor.execute(f'INSERT INTO recordings ({columns_clause}) VALUES ({placeholders})', (id, *values, now, now))
     conn.commit()
 
 def get_record(conn, id):
