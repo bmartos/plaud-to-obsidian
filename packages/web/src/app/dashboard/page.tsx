@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction, pauseAction, pauseAllActions, getFileContent } from '../actions';
+import { useRouter } from 'next/navigation';
+import { validatePlaudLogin, getSettings, listRecordings, syncRecordings, processAction, pauseAction, pauseAllActions, getFileContent, deleteRecording } from '../actions';
 
 export default function DashboardPage() {
   const [recordings, setRecordings] = useState<any[]>([]);
@@ -21,6 +22,16 @@ export default function DashboardPage() {
     audioUrl?: string;
   }>({ isOpen: false, title: '', type: 'text', content: '' });
 
+  // State for delete confirmation modal
+  const [deleteModal, setDeleteModal] = useState<{
+    isOpen: boolean;
+    id: string;
+    filename: string;
+    step: 'confirm' | 'deleting-files' | 'deleting-db' | 'done' | 'error';
+    errorMessage?: string;
+    deletedFiles?: string[];
+  }>({ isOpen: false, id: '', filename: '', step: 'confirm' });
+
   // States for sorting
   const [sortField, setSortField] = useState<string>('start_time');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -34,6 +45,7 @@ export default function DashboardPage() {
   const [filterDownload, setFilterDownload] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterTranscribe, setFilterTranscribe] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
   const [filterAnalyze, setFilterAnalyze] = useState<string>('todos'); // 'todos' | 'sim' | 'nao'
+  const [searchTitle, setSearchTitle] = useState<string>(''); // busca por título
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setNotification({ message, type });
@@ -83,7 +95,11 @@ export default function DashboardPage() {
 
     setSettings(settingsData);
     if (recsResult.success) {
-      setRecordings(recsResult.data || []);
+      const formatted = (recsResult.data || []).map((r: any) => ({
+        ...r,
+        filename: r.fullname || r.filename || 'Sem Título'
+      }));
+      setRecordings(formatted);
     }
     setLoading(false);
   }
@@ -95,7 +111,11 @@ export default function DashboardPage() {
     const interval = setInterval(() => {
       listRecordings().then(res => {
         if (res.success) {
-          setRecordings(res.data || []);
+          const formatted = (res.data || []).map((r: any) => ({
+            ...r,
+            filename: r.fullname || r.filename || 'Sem Título'
+          }));
+          setRecordings(formatted);
         }
       });
     }, 5000);
@@ -131,6 +151,36 @@ export default function DashboardPage() {
     } finally {
       setProcessingId(null);
     }
+  };
+
+  const handleDelete = async (id: string, filename: string) => {
+    setDeleteModal({ isOpen: true, id, filename, step: 'confirm' });
+  };
+
+  const confirmDelete = async () => {
+    const { id, filename } = deleteModal;
+    // Step 1: deletando arquivos
+    setDeleteModal(prev => ({ ...prev, step: 'deleting-files' }));
+    await new Promise(r => setTimeout(r, 400)); // pequena pausa visual
+
+    const result = await deleteRecording(id);
+
+    if (!result.success) {
+      setDeleteModal(prev => ({ ...prev, step: 'error', errorMessage: result.error || result.message }));
+      return;
+    }
+
+    // Step 2: confirmando deleção no banco
+    setDeleteModal(prev => ({ ...prev, step: 'deleting-db', deletedFiles: result.deletedFiles }));
+    await new Promise(r => setTimeout(r, 600));
+
+    // Step 3: concluído — remove da lista local imediatamente
+    setDeleteModal(prev => ({ ...prev, step: 'done' }));
+    setRecordings(prev => prev.filter(r => r.id !== id));
+    await new Promise(r => setTimeout(r, 1200));
+
+    setDeleteModal({ isOpen: false, id: '', filename: '', step: 'confirm' });
+    showNotification(`"${filename}" deletada com sucesso.`, 'success');
   };
 
   const handlePause = async (id: string) => {
@@ -169,40 +219,13 @@ export default function DashboardPage() {
     }
   };
 
-  // Função auxiliar para calcular progresso individual de cada arquivo (download = 33.3%, transcribe = 33.3%, analyze = 33.4%)
-  const getRecordProgress = (rec: any) => {
-    let progress = 0;
-    if (rec.downloaded) progress += 33.3;
-    else if (rec.status === 'downloading') progress += (rec.progress || 0) * 0.333;
-
-    if (rec.transcribed) progress += 33.3;
-    else if (rec.status === 'transcribing') progress += (rec.progress || 0) * 0.333;
-
-    if (rec.analyzed) progress += 33.4;
-    else if (rec.status === 'summarizing') progress += (rec.progress || 0) * 0.334;
-
-    return Math.min(Math.round(progress), 100);
-  };
-
   const totalFiles = recordings.length;
   const toTranscribe = recordings.filter(r => !r.transcribed).length;
   const toSummarize = recordings.filter(r => !r.analyzed).length;
 
-  // Contar quantos arquivos estão 100% concluídos
-  const syncedCount = recordings.filter(r => r.downloaded && r.transcribed && r.analyzed).length;
-
-  // Calcular progresso geral ponderado da biblioteca
-  const totalProgress = totalFiles > 0
-    ? Math.round(recordings.reduce((sum, rec) => sum + getRecordProgress(rec), 0) / totalFiles)
-    : 0;
-
-  // Obter gravações que estão sendo processadas no momento
   const activeRecordings = recordings.filter(r => r.status && r.status !== 'idle' && r.status !== 'error');
-
-  // Determine if any task is globally running
   const isAnyProcessing = activeRecordings.length > 0;
 
-  // Sorting handler
   const handleSort = (field: string) => {
     if (sortField === field) {
       setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
@@ -212,20 +235,22 @@ export default function DashboardPage() {
     }
   };
 
-  // Apply filters
   const filteredRecordings = recordings.filter(rec => {
-    // 1. Date filter (Dropdown mapped logic)
+    if (searchTitle.trim()) {
+      const needle = searchTitle.trim().toLowerCase();
+      const haystack = (rec.fullname || rec.filename || '').toLowerCase();
+      if (!haystack.includes(needle)) return false;
+    }
     if (dateFilterType !== 'todos') {
       if (!rec.start_time) return false;
-      const recDateStr = rec.start_time.split(' ')[0]; // "YYYY-MM-DD"
+      const recDateStr = rec.start_time.split(' ')[0];
       
-      // Get current dates using local timezone comparison values
       const getLocalDateStr = (offsetDays = 0): string => {
         const d = new Date();
         if (offsetDays !== 0) {
           d.setDate(d.getDate() + offsetDays);
         }
-        return d.toLocaleDateString('en-CA'); // Returns "YYYY-MM-DD" in local timezone
+        return d.toLocaleDateString('en-CA');
       };
 
       if (dateFilterType === 'hoje') {
@@ -253,21 +278,18 @@ export default function DashboardPage() {
       }
     }
 
-    // 2. Download filter
     if (filterDownload !== 'todos') {
       const isDownloaded = rec.downloaded === 1;
       if (filterDownload === 'sim' && !isDownloaded) return false;
       if (filterDownload === 'nao' && isDownloaded) return false;
     }
 
-    // 3. Transcribe filter
     if (filterTranscribe !== 'todos') {
       const isTranscribed = rec.transcribed === 1;
       if (filterTranscribe === 'sim' && !isTranscribed) return false;
       if (filterTranscribe === 'nao' && isTranscribed) return false;
     }
 
-    // 4. Summarize filter
     if (filterAnalyze !== 'todos') {
       const isAnalyzed = rec.analyzed === 1;
       if (filterAnalyze === 'sim' && !isAnalyzed) return false;
@@ -277,7 +299,6 @@ export default function DashboardPage() {
     return true;
   });
 
-  // Compute sorted recordings
   const sortedRecordings = [...filteredRecordings].sort((a, b) => {
     let valA = '';
     let valB = '';
@@ -361,14 +382,6 @@ export default function DashboardPage() {
     );
   };
 
-  console.log('Dashboard State (sync button disabled reasons):', {
-    syncing,
-    processingId,
-    isAnyProcessing,
-    recordingStatuses: recordings.map(r => ({ id: r.id, status: r.status }))
-  });
-
-
   if (loading && recordings.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -379,7 +392,6 @@ export default function DashboardPage() {
 
   return (
     <main className="p-8 font-sans">
-      {/* Toast Notification (System Message) */}
       {notification && (
         <div className={`fixed top-6 right-6 z-50 p-4 rounded-2xl shadow-2xl border flex items-center gap-3 animate-in slide-in-from-top-5 fade-in duration-300 ${
           notification.type === 'success' 
@@ -486,7 +498,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Fila de Tarefas Ativas (exibida apenas quando houver atividade) */}
+        {/* Fila de Tarefas Ativas */}
         {(isAnyProcessing || syncing) && (
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-4 animate-in fade-in duration-300">
             <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
@@ -504,7 +516,6 @@ export default function DashboardPage() {
                 )}
               </h3>
             </div>
-
             <div className="space-y-4">
               {syncing && (
                 <div className="flex items-center justify-between text-xs font-bold text-slate-600">
@@ -526,7 +537,7 @@ export default function DashboardPage() {
                       <span className="text-blue-600 font-black">
                         {rec.status === 'downloading' ? 'Baixando áudio' : rec.status === 'transcribing' ? 'Transcrevendo' : 'Gerando resumo'} ({rec.progress || 0}%)
                       </span>
-                      <button 
+                      <button
                         onClick={() => handlePause(rec.id)}
                         disabled={processingId !== null}
                         className="p-1 hover:bg-slate-100 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
@@ -555,6 +566,34 @@ export default function DashboardPage() {
 
            {/* Filter Bar */}
            <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-6">
+             {/* Title Search */}
+             <div className="flex flex-col gap-1.5 min-w-[220px] flex-1">
+               <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Buscar por Título</label>
+               <div className="relative">
+                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                 </svg>
+                 <input
+                   type="text"
+                   value={searchTitle}
+                   onChange={(e) => setSearchTitle(e.target.value)}
+                   placeholder="Digite parte do título..."
+                   className="w-full pl-8 pr-8 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-semibold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm placeholder:text-slate-300"
+                 />
+                 {searchTitle && (
+                   <button
+                     onClick={() => setSearchTitle('')}
+                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors cursor-pointer"
+                     title="Limpar busca"
+                   >
+                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                     </svg>
+                   </button>
+                 )}
+               </div>
+             </div>
+
              <div className="flex flex-col gap-1.5 min-w-[180px]">
                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Período de Gravação</label>
                <select
@@ -572,12 +611,11 @@ export default function DashboardPage() {
                </select>
              </div>
 
-             {/* Graphical picker for custom single date */}
              {dateFilterType === 'unica' && (
                <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data do Arquivo</label>
-                 <input 
-                   type="date" 
+                 <input
+                   type="date"
                    value={customSingleDate}
                    onChange={(e) => setCustomSingleDate(e.target.value)}
                    className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
@@ -585,13 +623,12 @@ export default function DashboardPage() {
                </div>
              )}
 
-             {/* Graphical picker for custom date range */}
              {dateFilterType === 'periodo' && (
                <>
                  <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Inicial</label>
-                   <input 
-                     type="date" 
+                   <input
+                     type="date"
                      value={customStartDate}
                      onChange={(e) => setCustomStartDate(e.target.value)}
                      className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
@@ -599,8 +636,8 @@ export default function DashboardPage() {
                  </div>
                  <div className="flex flex-col gap-1.5 min-w-[140px] animate-in slide-in-from-left-2 duration-200">
                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Data Final</label>
-                   <input 
-                     type="date" 
+                   <input
+                     type="date"
                      value={customEndDate}
                      onChange={(e) => setCustomEndDate(e.target.value)}
                      className="px-3.5 py-2 bg-white border border-slate-200 rounded-2xl text-slate-700 font-bold text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm cursor-pointer"
@@ -648,9 +685,10 @@ export default function DashboardPage() {
                </select>
              </div>
 
-             {(dateFilterType !== 'todos' || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
-               <button 
+             {(searchTitle !== '' || dateFilterType !== 'todos' || filterDownload !== 'todos' || filterTranscribe !== 'todos' || filterAnalyze !== 'todos') && (
+               <button
                  onClick={() => {
+                   setSearchTitle('');
                    setDateFilterType('todos');
                    setCustomSingleDate('');
                    setCustomStartDate('');
@@ -668,7 +706,7 @@ export default function DashboardPage() {
                </button>
              )}
            </div>
-           
+
            <div className="overflow-x-auto">
              <table className="w-full text-left border-collapse">
                <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -679,6 +717,7 @@ export default function DashboardPage() {
                    <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('downloaded', 'Download', true)}</th>
                    <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('transcribed', 'Transcrição', true)}</th>
                    <th className="p-4 border-b border-slate-100 w-24 text-center">{renderHeader('analyzed', 'Resumo', true)}</th>
+                   <th className="p-4 border-b border-slate-100 w-12"></th>
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-50">
@@ -694,7 +733,6 @@ export default function DashboardPage() {
                        </td>
                        <td className="p-4 text-xs font-medium text-slate-500">{rec.duration_text || (Math.round(rec.duration / 60000) + ' min')}</td>
                        
-                       {/* Download Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.downloaded ? (
                            <button 
@@ -733,7 +771,6 @@ export default function DashboardPage() {
                          )}
                        </td>
 
-                       {/* Transcribe Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.transcribed ? (
                            <button 
@@ -772,7 +809,6 @@ export default function DashboardPage() {
                          )}
                        </td>
 
-                       {/* Summarize Column */}
                        <td className="p-4 text-center align-middle">
                          {rec.analyzed ? (
                            <button 
@@ -810,11 +846,23 @@ export default function DashboardPage() {
                            </button>
                          )}
                        </td>
+                       <td className="p-4 text-center align-middle">
+                         <button
+                           onClick={() => handleDelete(rec.id, rec.filename)}
+                           disabled={processingId !== null || isAnyProcessing}
+                           className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 disabled:pointer-events-none"
+                           title="Deletar gravação"
+                         >
+                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                           </svg>
+                         </button>
+                       </td>
                      </tr>
                    ))
                  ) : (
                    <tr>
-                     <td colSpan={6} className="p-20 text-center">
+                     <td colSpan={7} className="p-20 text-center">
                         <div className="min-h-[200px] flex flex-col items-center justify-center gap-3">
                           <svg className="w-12 h-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -829,6 +877,129 @@ export default function DashboardPage() {
            </div>
         </section>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-md p-8 border border-slate-100 shadow-2xl relative m-4 animate-in zoom-in-95 duration-200">
+            {deleteModal.step === 'confirm' && (
+              <>
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900">Deletar Gravação?</h2>
+                    <p className="text-xs text-slate-400 font-medium mt-0.5">Esta ação é irreversível</p>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-600 font-semibold mb-2">Serão permanentemente deletados:</p>
+                <ul className="text-xs text-slate-500 space-y-1 mb-6 bg-slate-50 rounded-2xl p-4 font-medium">
+                  <li className="flex items-center gap-2"><span className="text-slate-400">🎵</span> Arquivo de áudio (se existir)</li>
+                  <li className="flex items-center gap-2"><span className="text-slate-400">📝</span> Arquivo de transcrição (se existir)</li>
+                  <li className="flex items-center gap-2"><span className="text-slate-400">📋</span> Arquivo de resumo (se existir)</li>
+                  <li className="flex items-center gap-2"><span className="text-slate-400">🗄️</span> Registro no banco de dados</li>
+                </ul>
+                <p className="text-xs font-black text-slate-700 mb-6 truncate" title={deleteModal.filename}>📁 {deleteModal.filename}</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeleteModal(prev => ({ ...prev, isOpen: false }))}
+                    className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-sm transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={confirmDelete}
+                    className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-bold text-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Deletar
+                  </button>
+                </div>
+              </>
+            )}
+
+            {deleteModal.step === 'deleting-files' && (
+              <div className="flex flex-col items-center gap-5 py-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-rose-50 flex items-center justify-center animate-pulse">
+                  <svg className="w-7 h-7 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-black text-slate-800 text-base">Apagando arquivos...</p>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Removendo áudio, transcrição e resumo</p>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-rose-500 h-1.5 rounded-full animate-pulse w-2/3" />
+                </div>
+              </div>
+            )}
+
+            {deleteModal.step === 'deleting-db' && (
+              <div className="flex flex-col items-center gap-5 py-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center animate-pulse">
+                  <svg className="w-7 h-7 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-black text-slate-800 text-base">Removendo do banco...</p>
+                  <p className="text-xs text-slate-400 font-medium mt-1">
+                    {deleteModal.deletedFiles && deleteModal.deletedFiles.length > 0
+                      ? `${deleteModal.deletedFiles.length} arquivo(s) removido(s) do disco`
+                      : 'Nenhum arquivo físico encontrado'}
+                  </p>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-amber-500 h-1.5 rounded-full animate-pulse w-4/5" />
+                </div>
+              </div>
+            )}
+
+            {deleteModal.step === 'done' && (
+              <div className="flex flex-col items-center gap-5 py-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-black text-slate-800 text-base">Deletado com sucesso!</p>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Gravação removida permanentemente</p>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-green-500 h-1.5 rounded-full w-full transition-all duration-500" />
+                </div>
+              </div>
+            )}
+
+            {deleteModal.step === 'error' && (
+              <div className="flex flex-col items-center gap-5 py-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-rose-50 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-black text-slate-800 text-base">Erro ao deletar</p>
+                  <p className="text-xs text-rose-400 font-medium mt-1 max-w-[280px]">{deleteModal.errorMessage}</p>
+                </div>
+                <button
+                  onClick={() => setDeleteModal({ isOpen: false, id: '', filename: '', step: 'confirm' })}
+                  className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-sm transition-colors cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal Component */}
       {modal.isOpen && (

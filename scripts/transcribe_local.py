@@ -117,6 +117,18 @@ def transcribe(audio_path, model_size="small", output_file=None):
         "esportes como triatlo e mergulho, e localizações como Santos, Ilhabela e Sorocaba. "
         "Mantenha a pontuação natural e evite repetições de gagueira."
     )
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        prompts_path = os.path.join(project_root, 'data', 'prompts.json')
+        if os.path.exists(prompts_path):
+            with open(prompts_path, 'r', encoding='utf-8') as pf:
+                prompts_data = json.load(pf)
+                if 'whisperPrompt' in prompts_data and prompts_data['whisperPrompt'].strip():
+                    prompt = prompts_data['whisperPrompt'].strip()
+                    print(f"Usando prompt do Whisper personalizado do prompts.json", file=sys.stderr, flush=True)
+    except Exception as pe:
+        print(f"Aviso ao carregar prompts.json: {pe}", file=sys.stderr, flush=True)
+
 
     # 2. Perform Transcription
     print(f"Transcrevendo áudio...", file=sys.stderr, flush=True)

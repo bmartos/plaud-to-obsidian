@@ -1,6 +1,6 @@
 import { unstable_noStore } from 'next/cache';
 import * as path from 'path';
-import { installPlaudCli as serverInstallPlaudCli, loginPlaudCli as serverLoginPlaudCli, logoutPlaudCli as serverLogoutPlaudCli, getPlaudUser as serverGetPlaudUser, validatePlaudLogin as serverValidatePlaudLogin, listRecordings as serverListRecordings, syncRecordings as serverSyncRecordings, processAction as serverProcessAction, updateObsidianPath as serverUpdateObsidianPath, pauseAction as serverPauseAction, pauseAllActions as serverPauseAllActions, getFileContent as serverGetFileContent } from './server-api';
+import { installPlaudCli as serverInstallPlaudCli, loginPlaudCli as serverLoginPlaudCli, logoutPlaudCli as serverLogoutPlaudCli, getPlaudUser as serverGetPlaudUser, validatePlaudLogin as serverValidatePlaudLogin, listRecordings as serverListRecordings, syncRecordings as serverSyncRecordings, processAction as serverProcessAction, updateObsidianPath as serverUpdateObsidianPath, pauseAction as serverPauseAction, pauseAllActions as serverPauseAllActions, getFileContent as serverGetFileContent, deleteRecording as serverDeleteRecording, getPrompts as serverGetPrompts, updatePrompts as serverUpdatePrompts } from './server-api';
 
 
 /**
@@ -100,3 +100,17 @@ export async function getFileContent(id: string, type: 'transcription' | 'summar
   return serverGetFileContent(id, type);
 }
 
+export async function deleteRecording(id: string) {
+  unstable_noStore();
+  return serverDeleteRecording(id);
+}
+
+export async function getPrompts() {
+  unstable_noStore();
+  return serverGetPrompts();
+}
+
+export async function updatePrompts(whisperPrompt: string, geminiPrompt: string) {
+  unstable_noStore();
+  return serverUpdatePrompts(whisperPrompt, geminiPrompt);
+}

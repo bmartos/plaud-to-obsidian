@@ -3,34 +3,58 @@ import sys
 import subprocess
 import sqlite3
 import re
+import time
 
 # Add scripts directory to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'scripts'))
 import db_manager
-from workflow_download import download_audio, get_target_filename
+from workflow_download import download_audio, get_target_filename, run_plaud_command, rename_record_files, get_obsidian_path as _wf_get_obsidian_path
 
 def get_obsidian_path():
-    # 1. Try env variable first (passed from Next.js server actions)
-    obs_path = os.environ.get("OBSIDIAN_PLAUD_PATH")
-    if obs_path and obs_path.strip():
-        return obs_path.strip()
+    # Reutiliza a implementação do workflow_download para consistência
+    return _wf_get_obsidian_path()
 
-    # 2. Try loading from packages/web/.env
+
+def sync_fullname_from_cloud(conn, record, env):
+    """
+    Consulta a API Plaud para obter o nome atual do arquivo.
+    Se o nome for diferente do banco, renomeia os arquivos físicos e
+    atualiza o banco. Retorna o record atualizado (com fullname correto).
+    """
+    file_id = record['id']
+    old_name = record.get('fullname', '') or ''
+
     try:
-        env_path = os.path.join(project_root, 'packages', 'web', '.env')
-        if os.path.exists(env_path):
-            with open(env_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if '=' in line and not line.strip().startswith('#'):
-                        k, v = line.split('=', 1)
-                        if k.strip() == 'OBSIDIAN_PLAUD_PATH' and v.strip():
-                            return v.strip().strip('"').strip("'")
-    except Exception as e:
-        print(f"[Warning] Failed to load path from .env: {e}", file=sys.stderr)
+        detail_res = None
+        for attempt in range(3):
+            detail_res = run_plaud_command(["file", file_id], env)
+            if detail_res and "id:" in detail_res.stdout:
+                break
+            print(f"  [sync_name] Attempt {attempt+1} failed, retrying in 2s...")
+            time.sleep(2.0)
 
-    # 3. Fallback to default
-    return os.path.join(os.path.dirname(project_root), 'Obsidian', 'plaud')
+        if not detail_res or "id:" not in detail_res.stdout:
+            print(f"  [sync_name] Could not fetch cloud details for {file_id} — using stored name.")
+            return record
+
+        m = re.search(r'name:\s+(.*)', detail_res.stdout)
+        cloud_name = m.group(1).strip() if m else None
+
+        if cloud_name and cloud_name != old_name:
+            print(f"  [sync_name] Name changed: '{old_name}' -> '{cloud_name}'")
+            audio_dir = os.path.join(project_root, 'data', 'audio')
+            obsidian_root = get_obsidian_path()
+            obsidian_trans_dir = os.path.join(obsidian_root, 'transcription')
+            obsidian_sum_dir = os.path.join(obsidian_root, 'summary')
+            rename_record_files(conn, record, cloud_name, audio_dir, obsidian_trans_dir, obsidian_sum_dir)
+            # Retorna o record atualizado para o caller usar o nome correto
+            return db_manager.get_record(conn, file_id) or {**record, 'fullname': cloud_name}
+    except Exception as e:
+        print(f"  [sync_name] Warning: could not sync name from cloud: {e}")
+
+    return record
+
 
 def main():
     if len(sys.argv) < 3:
@@ -53,6 +77,9 @@ def main():
     env["PYTHONIOENCODING"] = "utf-8"
 
     if action == "download":
+        # Garantir que o nome no banco está atualizado antes de criar o arquivo
+        record = sync_fullname_from_cloud(conn, record, env)
+
         audio_dir = os.path.join(project_root, 'data', 'audio')
         os.makedirs(audio_dir, exist_ok=True)
         
@@ -65,7 +92,7 @@ def main():
                 "id": file_id,
                 "downloaded": 1,
                 "audio_path": local_audio,
-                "filesize": actual_size,
+                "filesize_mb": round(actual_size / (1024 * 1024), 2),
                 "status": "idle",
                 "progress": 0
             })
@@ -76,6 +103,9 @@ def main():
             sys.exit(1)
 
     elif action == "transcribe":
+        # Garantir que o nome no banco está atualizado antes de criar o arquivo
+        record = sync_fullname_from_cloud(conn, record, env)
+
         if not record['audio_path'] or not os.path.exists(record['audio_path']):
             print("Error: Audio file must be downloaded first before local transcription.")
             sys.exit(1)
@@ -118,6 +148,9 @@ def main():
             sys.exit(1)
 
     elif action == "summarize":
+        # Garantir que o nome no banco está atualizado antes de criar o arquivo
+        record = sync_fullname_from_cloud(conn, record, env)
+
         if not record['transcription_path'] or not os.path.exists(record['transcription_path']):
             print("Error: Transcription must exist before summarizing.")
             sys.exit(1)
@@ -144,8 +177,8 @@ def main():
             with open(record['transcription_path'], 'r', encoding='utf-8') as f:
                 transcript_text = f.read()
                 
-            prompt = f"""
-Você é um modelo de NLP especializado em analisar transcrições de áudio, gerar resumos executivos estruturados e extrair palavras-chave relevantes como tags para o Obsidian.
+            import json
+            gemini_prompt = """Você é um modelo de NLP especializado em analisar transcrições de áudio, gerar resumos executivos estruturados e extrair palavras-chave relevantes como tags para o Obsidian.
 
 Com base na transcrição abaixo, gere o resumo do documento seguindo exatamente a estrutura abaixo:
 
@@ -153,11 +186,24 @@ Com base na transcrição abaixo, gere o resumo do documento seguindo exatamente
 2. **Título**: Um título em Markdown (usando '#' no início) representando o assunto principal.
 3. **Resumo Executivo**: Uma seção iniciada por "## 🎯 Resumo Executivo" descrevendo brevemente os tópicos centrais.
 4. **Principais Tópicos**: Uma seção iniciada por "## 🗺️ Tópicos Discutidos" contendo pontos detalhados em tópicos (bullet points).
-5. **Ações/Decisões**: Uma seção iniciada por "## ✅ Action Items" com tarefas, decisões ou próximos passos identificados e seus responsáveis.
+5. **Ações/Decisões**: Uma seção iniciada por "## ✅ Action Items" com tarefas, decisões ou próximos passos identificados e seus responsáveis."""
 
-Transcrição:
-{transcript_text}
-"""
+            try:
+                prompts_path = os.path.join(project_root, 'data', 'prompts.json')
+                if os.path.exists(prompts_path):
+                    with open(prompts_path, 'r', encoding='utf-8') as pf:
+                        prompts_data = json.load(pf)
+                        if 'geminiPrompt' in prompts_data and prompts_data['geminiPrompt'].strip():
+                            gemini_prompt = prompts_data['geminiPrompt'].strip()
+                            print(f"Usando prompt do Gemini personalizado do prompts.json")
+            except Exception as pe:
+                print(f"Aviso ao carregar prompts.json: {pe}")
+
+            if "{transcript_text}" in gemini_prompt:
+                prompt = gemini_prompt.replace("{transcript_text}", transcript_text)
+            else:
+                prompt = gemini_prompt + f"\n\nTranscrição:\n{transcript_text}"
+
             # Using gemini-3.5-flash as it is available in this environment
             response = client.models.generate_content(
                 model='gemini-3.5-flash', 
